@@ -14,3 +14,8 @@ repository = "https://github.com/PowerUserZ/tuxread"
 tuxread-core = { path = "crates/core" }
 gptman = { version = "3.1", default-features = false }
 mbrman = "0.6"
+ext4-view = { version = "1.0", features = ["std"] }
+
+[patch.crates-io]
+# ext4-view 1.0.0 plus two fixes found by the corpus; see vendor/ext4-view/PATCHES.md.
+ext4-view = { path = "vendor/ext4-view" }
