@@ -9,7 +9,7 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::ptr;
 
 use windows_sys::Win32::Foundation::{
-    ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, LocalFree, STATUS_SUCCESS,
+    ERROR_NO_DATA, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, LocalFree, STATUS_SUCCESS,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -247,8 +247,10 @@ pub fn accept(pipe: &File) -> io::Result<()> {
         return Ok(());
     }
     let error = io::Error::last_os_error();
-    // A client that connected between creation and this call is still a connection.
-    if error.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) {
+    // A client that connected between creation and this call is still a connection, and
+    // so is one that has already left again (the first read then finds the pipe closed).
+    let code = error.raw_os_error();
+    if code == Some(ERROR_PIPE_CONNECTED as i32) || code == Some(ERROR_NO_DATA as i32) {
         Ok(())
     } else {
         Err(error)

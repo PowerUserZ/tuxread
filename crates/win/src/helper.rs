@@ -373,6 +373,27 @@ mod tests {
         let second = sys::create_pipe(&name, false, &sddl, 4096);
         assert!(second.is_ok(), "{second:?}");
     }
+
+    #[test]
+    fn a_client_that_leaves_before_it_is_accepted_does_not_stop_the_helper() {
+        // ConnectNamedPipe fails with ERROR_NO_DATA when a client connected and closed
+        // before it was called. `serve` ends on an accept error, taking every open disk with
+        // it, so this must count as an accepted (and already finished) connection.
+        let name = new_pipe_name().unwrap();
+        let own = Process::open(std::process::id())
+            .unwrap()
+            .user_sid()
+            .unwrap();
+        let pipe = sys::create_pipe(&name, true, &pipe_sddl(&own, &own), 4096).unwrap();
+        let client = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&name)
+            .unwrap();
+        drop(client);
+        let accepted = sys::accept(&pipe);
+        assert!(accepted.is_ok(), "{accepted:?}");
+    }
 }
 
 /// A running helper, started by `launch`.
