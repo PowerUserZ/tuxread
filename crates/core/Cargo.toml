@@ -10,3 +10,4 @@ repository.workspace = true
 [dependencies]
 gptman.workspace = true
 mbrman.workspace = true
+ext4-view.workspace = true

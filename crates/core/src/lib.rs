@@ -14,6 +14,7 @@
 pub mod cache;
 pub mod dev;
 pub mod error;
+pub mod fs;
 pub mod ident;
 pub mod part;
 
