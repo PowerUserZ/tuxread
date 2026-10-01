@@ -1,0 +1,40 @@
+[package]
+name = "tuxread-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tuxread-core = { path = "../crates/core" }
+
+# The fuzz crate is its own workspace, so it repeats the root's patch.
+[patch.crates-io]
+ext4-view = { path = "../vendor/ext4-view" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "probe"
+path = "fuzz_targets/probe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "part"
+path = "fuzz_targets/part.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ext"
+path = "fuzz_targets/ext.rs"
+test = false
+doc = false
+bench = false
