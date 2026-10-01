@@ -77,6 +77,9 @@ fn guarded<T>(parse: impl FnOnce() -> Option<T>) -> Option<T> {
 
 /// A valid GPT (512- or 4096-byte sectors, CRC-checked, backup header as fallback), if any.
 pub fn read_gpt(dev: &dyn BlockDev) -> Option<Table> {
+    if !gpt_headers_fit(dev) {
+        return None;
+    }
     let gpt = guarded(|| gptman::GPT::find_from(&mut DevCursor::new(dev)).ok())?;
     let ss = gpt.sector_size;
     let partitions = gpt
@@ -97,6 +100,27 @@ pub fn read_gpt(dev: &dyn BlockDev) -> Option<Table> {
         kind: TableKind::Gpt,
         sector_size: ss,
         partitions,
+    })
+}
+
+/// gptman reserves memory for a header's entry count before reading the entries, and a
+/// failed allocation aborts the process: it is not a panic `guarded` can catch. So every
+/// valid header gptman may read (primary and backup, 512- and 4096-byte sectors) must, like
+/// in the kernel's efi.c, use 128-byte entries and a table of at most 4 MiB.
+fn gpt_headers_fit(dev: &dyn BlockDev) -> bool {
+    [512u64, 4096].into_iter().all(|ss| {
+        let backup = (dev.len() / ss).saturating_sub(1) * ss;
+        [ss, backup].into_iter().all(|at| {
+            let header = guarded(|| {
+                let mut cursor = DevCursor::new(dev);
+                cursor.seek(SeekFrom::Start(at)).ok()?;
+                gptman::GPTHeader::read_from(&mut cursor).ok()
+            });
+            header.is_none_or(|h| {
+                h.size_of_partition_entry == 128
+                    && u64::from(h.number_of_partition_entries) * 128 <= 4 << 20
+            })
+        })
     })
 }
 

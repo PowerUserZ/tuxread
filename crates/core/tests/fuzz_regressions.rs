@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use tuxread_core::dev::{BlockDev, MemDev};
 use tuxread_core::fs::FsInfo;
 use tuxread_core::fs::ext::ExtFs;
+use tuxread_core::part;
 use tuxread_core::probe::{self, NodeKind, Status};
 
 static LARGEST: AtomicUsize = AtomicUsize::new(0);
@@ -106,5 +107,42 @@ fn block_groups_that_fit_the_device_are_still_capped() {
     let (opened, largest) =
         largest_allocation(|| ExtFs::open(Arc::new(dev), FsInfo::default()).is_ok());
     assert!(!opened, "8 million block groups were loaded");
+    assert!(largest < 64 << 20, "largest allocation: {largest} bytes");
+}
+
+/// CRC-32 (ISO-HDLC), as GPT headers use.
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+#[test]
+fn a_gpt_header_claiming_millions_of_entries_reserves_nothing() {
+    // Review finding: gptman reserves memory for the header's entry count before reading
+    // the entries. Forging the header CRC is easy, and a failed allocation aborts.
+    let mut disk = vec![0u8; 2048];
+    let header = &mut disk[512..512 + 92];
+    header[0..8].copy_from_slice(b"EFI PART");
+    header[8..12].copy_from_slice(&[0, 0, 1, 0]);
+    header[12..16].copy_from_slice(&92u32.to_le_bytes());
+    header[24..32].copy_from_slice(&1u64.to_le_bytes()); // this header's LBA
+    header[72..80].copy_from_slice(&2u64.to_le_bytes()); // entries start at LBA 2
+    header[80..84].copy_from_slice(&0x0800_0000u32.to_le_bytes()); // 134 million entries
+    header[84..88].copy_from_slice(&128u32.to_le_bytes());
+    let crc = crc32(header);
+    header[16..20].copy_from_slice(&crc.to_le_bytes());
+
+    let (table, largest) = largest_allocation(|| part::read_gpt(&MemDev(disk)));
+    assert!(table.is_none());
     assert!(largest < 64 << 20, "largest allocation: {largest} bytes");
 }
