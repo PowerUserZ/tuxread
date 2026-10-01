@@ -12,6 +12,7 @@
 )]
 
 pub mod cache;
+pub mod copy;
 pub mod dev;
 pub mod error;
 pub mod fs;
