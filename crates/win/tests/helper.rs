@@ -16,7 +16,7 @@ fn main() {}
 #[cfg(windows)]
 mod windows {
     use std::fs::OpenOptions;
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::path::{Path, PathBuf};
     use std::process::{Command, ExitCode};
     use std::sync::Arc;
@@ -356,10 +356,32 @@ mod windows {
             .unwrap()
             .set_len(0)
             .unwrap();
-        let results = within(10, move || {
-            [0u64, 1024].map(|offset| disk.read_exact_at(offset, &mut [0u8; 512]).is_err())
+        let (disk, errors) = within(10, move || {
+            let errors =
+                [0u64, 1024].map(|offset| disk.read_exact_at(offset, &mut [0u8; 512]).err());
+            (disk, errors)
         });
-        assert_eq!(results, [true, true]);
+        for error in errors {
+            let error = error.expect("a read of a vanished source succeeded");
+            // A `Failed` reply from a helper that is still serving, not a dropped connection.
+            assert!(
+                !error.to_string().contains("closed the connection"),
+                "{error}"
+            );
+        }
+        // The source comes back: the same connection reads again.
+        OpenOptions::new()
+            .write(true)
+            .open(&copy)
+            .unwrap()
+            .write_all(&std::fs::read(image()).unwrap())
+            .unwrap();
+        let block = within(10, move || {
+            let mut block = [0u8; 512];
+            disk.read_exact_at(1024, &mut block).map(|()| block)
+        })
+        .unwrap();
+        assert_eq!(block[56..58], [0x53, 0xEF]); // ext superblock magic
         let _ = std::fs::remove_file(&copy);
     }
 
