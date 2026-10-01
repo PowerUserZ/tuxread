@@ -14,6 +14,7 @@
 pub mod cache;
 pub mod dev;
 pub mod error;
+pub mod ident;
 pub mod part;
 
 pub use error::{Error, Result};
