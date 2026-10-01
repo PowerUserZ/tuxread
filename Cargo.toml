@@ -12,3 +12,5 @@ repository = "https://github.com/PowerUserZ/tuxread"
 
 [workspace.dependencies]
 tuxread-core = { path = "crates/core" }
+gptman = { version = "3.1", default-features = false }
+mbrman = "0.6"

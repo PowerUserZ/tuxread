@@ -8,3 +8,5 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+gptman.workspace = true
+mbrman.workspace = true
