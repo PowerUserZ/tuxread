@@ -91,8 +91,21 @@ impl Fs for ExtFs {
             if name == b"." || name == b".." {
                 continue;
             }
-            let meta = item.metadata().map_err(map_err)?;
-            out.push(entry(name.to_vec(), &meta));
+            // A damaged inode must not hide the rest of the folder: list its name, and let
+            // stat and open report the damage for that one entry.
+            out.push(match item.metadata() {
+                Ok(meta) => entry(name.to_vec(), &meta),
+                Err(_) => Entry {
+                    name: name.to_vec(),
+                    kind: item.file_type().map_or(Kind::Other, kind),
+                    size: 0,
+                    mtime: None,
+                    mode: 0,
+                    uid: 0,
+                    gid: 0,
+                    ino: 0,
+                },
+            });
         }
         Ok(out)
     }
