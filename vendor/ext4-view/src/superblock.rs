@@ -74,7 +74,16 @@ impl Superblock {
             read_u32le(bytes, S_HASH_SEED_OFFSET + 12),
         ];
         let s_desc_size = read_u16le(bytes, Self::S_DESC_SIZE_OFFSET);
-        let s_blocks_count_hi = read_u32le(bytes, 0x150);
+        // TuxRead patch: like the kernel (`ext4_blocks_count`), the high
+        // half only counts when the 64bit feature is set.
+        let s_blocks_count_hi = if s_feature_incompat
+            & IncompatibleFeatures::IS_64BIT.bits()
+            != 0
+        {
+            read_u32le(bytes, 0x150)
+        } else {
+            0
+        };
         let s_checksum_seed = read_u32le(bytes, 0x270);
         const S_CHECKSUM_OFFSET: usize = 0x3fc;
         let s_checksum = read_u32le(bytes, S_CHECKSUM_OFFSET);
@@ -331,6 +340,27 @@ mod tests {
             Superblock::from_bytes(&data).unwrap_err(),
             CorruptKind::TooManyBlockGroups
         );
+    }
+
+    /// TuxRead patch: like the kernel, `s_blocks_count_hi` only counts
+    /// when the 64bit feature is set.
+    #[test]
+    fn tuxread_blocks_count_hi_needs_64bit() {
+        let mut data =
+            include_bytes!("../test_data/raw_superblock.bin").to_vec();
+        let ifeat_range = 0x60..0x64;
+        let mut ifeat = IncompatibleFeatures::from_bits_retain(
+            u32::from_le_bytes(data[ifeat_range.clone()].try_into().unwrap()),
+        );
+        ifeat.remove(IncompatibleFeatures::IS_64BIT);
+        data[ifeat_range].copy_from_slice(&ifeat.bits().to_le_bytes());
+        data[0x150..0x154].copy_from_slice(&1u32.to_le_bytes());
+        let mut checksum = Checksum::new();
+        checksum.update(&data[..0x3fc]);
+        data[0x3fc..].copy_from_slice(&checksum.finalize().to_le_bytes());
+
+        let sb = Superblock::from_bytes(&data).unwrap();
+        assert_eq!(sb.blocks_count, 128);
     }
 
     #[test]

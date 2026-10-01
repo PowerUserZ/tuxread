@@ -72,3 +72,15 @@ fn a_damaged_inode_does_not_hide_its_neighbours() {
     assert_eq!(names, ["a.txt", "dir", "link", "lost+found"]);
     assert!(fs.stat(b"/a.txt").is_err());
 }
+
+#[test]
+fn a_filesystem_larger_than_its_device_is_refused() {
+    // Like the kernel: "block count exceeds size of device".
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tiny-ext4.img");
+    let mut image = std::fs::read(path).unwrap();
+    image.truncate(256 * 1024);
+    match ExtFs::open(Arc::new(MemDev(image)), FsInfo::default()) {
+        Ok(_) => panic!("a truncated filesystem was opened"),
+        Err(e) => assert!(e.to_string().contains("exceeds"), "{e}"),
+    }
+}

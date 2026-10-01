@@ -19,7 +19,9 @@ Changes (found by the TuxRead corpus, spec §7):
 4. `src/metadata.rs`, `src/inode.rs`: `Metadata::inode()` returns the inode
    number, so the copy engine can recognise a folder loop in a damaged
    filesystem. Test: `copy::tests::a_folder_that_contains_itself_is_skipped`.
+5. `src/superblock.rs`: `s_blocks_count_hi` only counts with the 64bit feature,
+   like the kernel's `ext4_blocks_count`. Test: `tuxread_blocks_count_hi_needs_64bit`.
 
-All four are to be proposed upstream as small, hand-written pull requests (the
+All five are to be proposed upstream as small, hand-written pull requests (the
 project requires the Google CLA). Delete this directory and the patch entry
-once a release contains all four changes.
+once a release contains all five changes.

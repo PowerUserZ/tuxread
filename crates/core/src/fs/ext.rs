@@ -31,9 +31,55 @@ pub struct ExtFs {
 impl ExtFs {
     /// Loads the filesystem; the journal, if dirty, is replayed in memory only.
     pub fn open(dev: Arc<dyn BlockDev>, info: FsInfo) -> Result<Self> {
+        check_geometry(dev.as_ref())?;
         let fs = Ext4::load(Box::new(DevReader(dev))).map_err(map_err)?;
         Ok(Self { fs, info })
     }
+}
+
+/// Most block groups we load. ponytail: ext4-view keeps every group descriptor in memory
+/// (16 bytes each), so this caps that at 64 MiB, which is 512 TiB with 4 KiB blocks. Larger
+/// volumes need ext4-view to load descriptors lazily.
+const MAX_GROUPS: u64 = 1 << 22;
+
+/// The kernel's size checks, made before ext4-view sizes anything from the superblock.
+/// Anything else wrong with the superblock is left for ext4-view to report.
+fn check_geometry(dev: &dyn BlockDev) -> Result<()> {
+    let mut sb = [0u8; 1024];
+    dev.read_exact_at(1024, &mut sb)?;
+    let field = |offset: usize| {
+        sb.get(offset..offset + 4)
+            .and_then(|b| b.try_into().ok())
+            .map_or(0, u32::from_le_bytes)
+    };
+    let log_block_size = field(0x18);
+    let per_group = u64::from(field(0x20));
+    if log_block_size > 6 || per_group == 0 {
+        return Ok(());
+    }
+    let block_size = 1024u64 << log_block_size;
+    // Like `ext4_blocks_count`: the high half only counts with the 64bit feature.
+    let hi = if field(0x60) & 0x80 != 0 {
+        u64::from(field(0x150))
+    } else {
+        0
+    };
+    let blocks = hi << 32 | u64::from(field(0x04));
+    let device_blocks = dev.len() / block_size;
+    if blocks > device_blocks {
+        return Err(Error::Corrupt(format!(
+            "block count {blocks} exceeds the size of the device ({device_blocks} blocks)"
+        )));
+    }
+    let groups = blocks
+        .saturating_sub(u64::from(field(0x14)))
+        .div_ceil(per_group);
+    if groups > MAX_GROUPS {
+        return Err(Error::Unsupported(format!(
+            "{groups} block groups; TuxRead reads up to {MAX_GROUPS}"
+        )));
+    }
+    Ok(())
 }
 
 fn path(p: &[u8]) -> Result<Path<'_>> {
