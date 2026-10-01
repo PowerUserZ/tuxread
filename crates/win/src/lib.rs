@@ -22,3 +22,6 @@ pub mod disk;
 pub mod helper;
 #[cfg(windows)]
 mod sys;
+
+#[cfg(windows)]
+pub use sys::is_elevated;

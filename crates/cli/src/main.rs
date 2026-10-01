@@ -7,21 +7,33 @@ use std::sync::atomic::AtomicBool;
 
 use tuxread_core::cache::CachedDev;
 use tuxread_core::copy::{Conflict, Outcome, copy_out};
-use tuxread_core::dev::FileDev;
+use tuxread_core::dev::{BlockDev, FileDev};
 use tuxread_core::fs::{Kind, join};
 use tuxread_core::probe::{self, Node, NodeKind, Status, Volume};
 
 const USAGE: &str = "usage:
-  tuxread-cli probe <image>
-  tuxread-cli ls <image> <volume> [path]
-  tuxread-cli cp <image> <volume> <path> <dest-folder>
+  tuxread-cli disks
+  tuxread-cli probe <source>
+  tuxread-cli ls <source> <volume> [path]
+  tuxread-cli cp <source> <volume> <path> <dest-folder>
 
+<source> is an image file, or disk:N for a disk listed by `disks`. Reading a disk
+needs administrator rights: from a normal console, Windows asks once (UAC).
 <volume> is the #number printed by `probe`.";
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let all: Vec<String> = std::env::args().collect();
+    #[cfg(windows)]
+    if let Some(helper_args) = tuxread_win::helper::parse_args(&all) {
+        // Started by `open_disk` below, elevated: serve disks to the parent, then exit.
+        return match tuxread_win::helper::run(&helper_args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => ExitCode::FAILURE,
+        };
+    }
+    let args: Vec<&str> = all.iter().skip(1).map(String::as_str).collect();
     let result = match args.as_slice() {
+        ["disks"] => disks_cmd(),
         ["probe", src] => probe_cmd(src),
         ["ls", src, vol] => ls_cmd(src, vol, "/"),
         ["ls", src, vol, path] => ls_cmd(src, vol, path),
@@ -40,9 +52,67 @@ fn main() -> ExitCode {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Source<'a> {
+    Image(&'a Path),
+    Disk(u32),
+}
+
+fn parse_source(src: &str) -> Result<Source<'_>, String> {
+    match src.strip_prefix("disk:") {
+        Some(n) => n
+            .parse()
+            .map(Source::Disk)
+            .map_err(|_| format!("bad disk number: {src}")),
+        None => Ok(Source::Image(Path::new(src))),
+    }
+}
+
 fn open_source(src: &str) -> Result<Vec<Node>, String> {
-    let file = FileDev::open(Path::new(src)).map_err(|e| format!("{src}: {e}"))?;
-    Ok(probe::probe(Arc::new(CachedDev::new(Arc::new(file)))))
+    let dev: Arc<dyn BlockDev> = match parse_source(src)? {
+        Source::Image(path) => Arc::new(FileDev::open(path).map_err(|e| format!("{src}: {e}"))?),
+        Source::Disk(n) => open_disk(n).map_err(|e| format!("{src}: {e}"))?,
+    };
+    Ok(probe::probe(Arc::new(CachedDev::new(dev))))
+}
+
+/// Elevated: reads the disk directly. Otherwise starts this program again as the disk
+/// helper, through one UAC prompt, and reads through it.
+#[cfg(windows)]
+fn open_disk(n: u32) -> Result<Arc<dyn BlockDev>, String> {
+    use tuxread_win::disk::WinDisk;
+    use tuxread_win::helper;
+    if tuxread_win::is_elevated() {
+        return Ok(Arc::new(WinDisk::open(n).map_err(|e| e.to_string())?));
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let helper = helper::launch(&exe, "", true).map_err(|e| e.to_string())?;
+    Ok(Arc::new(helper.open_disk(n).map_err(|e| e.to_string())?))
+}
+
+#[cfg(not(windows))]
+fn open_disk(_: u32) -> Result<Arc<dyn BlockDev>, String> {
+    Err("disk sources are only available on Windows".into())
+}
+
+#[cfg(windows)]
+fn disks_cmd() -> Result<(), String> {
+    for d in tuxread_win::disk::list_disks() {
+        println!(
+            "disk:{}  {}  [{}]  {}, {}-byte sectors",
+            d.number,
+            d.model,
+            human_size(d.size),
+            d.bus,
+            d.logical_sector
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn disks_cmd() -> Result<(), String> {
+    Err("listing disks is only available on Windows".into())
 }
 
 fn volume(nodes: &[Node], number: &str) -> Result<Volume, String> {
@@ -224,6 +294,21 @@ mod tests {
         assert_eq!(format_time(-60), "1969-12-31 23:59");
         assert_eq!(format_time(2_147_483_648), "2038-01-19 03:14");
         assert_eq!(format_time(951_782_400), "2000-02-29 00:00");
+    }
+
+    #[test]
+    fn sources_are_images_or_disk_numbers() {
+        assert_eq!(parse_source("disk:3"), Ok(Source::Disk(3)));
+        assert_eq!(
+            parse_source("disk.img"),
+            Ok(Source::Image(Path::new("disk.img")))
+        );
+        assert_eq!(
+            parse_source(r"C:\images\disk.raw"),
+            Ok(Source::Image(Path::new(r"C:\images\disk.raw")))
+        );
+        assert!(parse_source("disk:").is_err());
+        assert!(parse_source("disk:-1").is_err());
     }
 
     #[test]

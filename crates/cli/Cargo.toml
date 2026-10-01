@@ -9,3 +9,6 @@ repository.workspace = true
 
 [dependencies]
 tuxread-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+tuxread-win.workspace = true

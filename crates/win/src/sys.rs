@@ -322,3 +322,28 @@ pub fn shell_execute(exe: &std::path::Path, params: &str, elevate: bool) -> io::
         OwnedHandle::from_raw_handle(info.hProcess)
     }))
 }
+
+/// True when this process runs with administrator rights (elevated).
+pub fn is_elevated() -> bool {
+    use windows_sys::Win32::Security::{TOKEN_ELEVATION, TokenElevation};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    // SAFETY: GetCurrentProcess returns a pseudo handle that needs no closing.
+    let process = unsafe { GetCurrentProcess() };
+    let Ok(token) = process_token(process) else {
+        return false;
+    };
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut returned = 0u32;
+    // SAFETY: the output buffer is a TOKEN_ELEVATION of the size passed.
+    let ok = unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(),
+            TokenElevation,
+            (&raw mut elevation).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+    };
+    ok != 0 && elevation.TokenIsElevated != 0
+}
