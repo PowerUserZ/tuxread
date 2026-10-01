@@ -18,5 +18,6 @@ pub mod fs;
 pub mod ident;
 pub mod part;
 pub mod probe;
+pub mod sanitize;
 
 pub use error::{Error, Result};
