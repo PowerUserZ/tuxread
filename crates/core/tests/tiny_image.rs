@@ -7,14 +7,21 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tuxread_core::Error;
-use tuxread_core::dev::{BlockDev, FileDev};
-use tuxread_core::fs::ext::ExtFs;
-use tuxread_core::fs::{Fs, FsInfo, Kind};
+use tuxread_core::cache::CachedDev;
+use tuxread_core::dev::FileDev;
+use tuxread_core::fs::{Fs, Kind};
+use tuxread_core::probe::{self, NodeKind};
 
 fn open_tiny() -> Box<dyn Fs> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tiny-ext4.img");
-    let dev: Arc<dyn BlockDev> = Arc::new(FileDev::open(&path).unwrap());
-    Box::new(ExtFs::open(dev, FsInfo::default()).unwrap())
+    let dev = Arc::new(CachedDev::new(Arc::new(FileDev::open(&path).unwrap())));
+    let nodes = probe::probe(dev);
+    let leaves = probe::leaves(&nodes);
+    let NodeKind::Volume(volume) = &leaves[0].kind else {
+        panic!("not a volume: {}", leaves[0].label)
+    };
+    assert_eq!(volume.info.fs_type, "ext4");
+    volume.open().unwrap()
 }
 
 #[test]
