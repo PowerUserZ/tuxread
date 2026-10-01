@@ -16,6 +16,12 @@ gptman = { version = "3.1", default-features = false }
 mbrman = "0.6"
 ext4-view = { version = "1.0", features = ["std"] }
 
+# test-only
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+
 [patch.crates-io]
 # ext4-view 1.0.0 plus two fixes found by the corpus; see vendor/ext4-view/PATCHES.md.
 ext4-view = { path = "vendor/ext4-view" }
