@@ -58,10 +58,17 @@ pub fn new_pipe_name() -> io::Result<String> {
     Ok(format!(r"\\.\pipe\tuxread-{}", sys::random_hex()?))
 }
 
-/// The pipe's security descriptor: full access for one user only (the parent's), and a
-/// Medium integrity label so the non-elevated app may connect to an elevated helper.
-pub fn pipe_sddl(user_sid: &str) -> String {
-    format!("D:P(A;;GA;;;{user_sid})S:(ML;;NW;;;ME)")
+/// The pipe's security descriptor: full access for the parent's user and the helper's own
+/// (the helper runs as another account for standard users who typed an admin's credentials,
+/// and under Administrator protection; without its own entry it could not add the pipe
+/// instance for the next connection), and a Medium integrity label so the non-elevated app
+/// may connect to an elevated helper.
+pub fn pipe_sddl(parent_sid: &str, own_sid: &str) -> String {
+    if parent_sid == own_sid {
+        format!("D:P(A;;GA;;;{parent_sid})S:(ML;;NW;;;ME)")
+    } else {
+        format!("D:P(A;;GA;;;{parent_sid})(A;;GA;;;{own_sid})S:(ML;;NW;;;ME)")
+    }
 }
 
 /// The helper's `main`: serves physical disks until the parent exits.
@@ -87,8 +94,9 @@ where
     F: Fn(u32) -> io::Result<WinDisk> + Send + Sync + 'static,
 {
     let parent = Process::open(args.parent)?;
-    let own_image = Process::open(std::process::id())?.image_path()?;
-    let sddl = pipe_sddl(&parent.user_sid()?);
+    let own = Process::open(std::process::id())?;
+    let own_image = own.image_path()?;
+    let sddl = pipe_sddl(&parent.user_sid()?, &own.user_sid()?);
     let open = Arc::new(open);
     let mut first = true;
     loop {
@@ -338,11 +346,32 @@ mod tests {
     }
 
     #[test]
-    fn the_pipe_grants_one_user_at_medium_integrity() {
+    fn the_pipe_grants_the_parent_and_the_helper_at_medium_integrity() {
+        let user = "S-1-5-21-1-2-3-1001";
         assert_eq!(
-            pipe_sddl("S-1-5-21-1-2-3-1001"),
+            pipe_sddl(user, user),
             "D:P(A;;GA;;;S-1-5-21-1-2-3-1001)S:(ML;;NW;;;ME)"
         );
+        assert_eq!(
+            pipe_sddl(user, "S-1-5-21-1-2-3-500"),
+            "D:P(A;;GA;;;S-1-5-21-1-2-3-1001)(A;;GA;;;S-1-5-21-1-2-3-500)S:(ML;;NW;;;ME)"
+        );
+    }
+
+    #[test]
+    fn a_helper_running_as_another_user_can_add_pipe_instances() {
+        // Standard users who type an admin's credentials, and Administrator protection, run
+        // the helper as another account than the app. LocalSystem stands in for the app's
+        // user here: the helper must still create one pipe instance per connection.
+        let name = new_pipe_name().unwrap();
+        let own = Process::open(std::process::id())
+            .unwrap()
+            .user_sid()
+            .unwrap();
+        let sddl = pipe_sddl("S-1-5-18", &own);
+        let _first = sys::create_pipe(&name, true, &sddl, 4096).unwrap();
+        let second = sys::create_pipe(&name, false, &sddl, 4096);
+        assert!(second.is_ok(), "{second:?}");
     }
 }
 
