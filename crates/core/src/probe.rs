@@ -56,18 +56,27 @@ pub fn probe(dev: Arc<dyn BlockDev>) -> Vec<Node> {
         return partition_nodes(&dev, &table);
     }
     let whole = content_node(dev.clone());
-    if !matches!(
+    // md metadata 0.90 sits at the end of its partition, so a last partition that reaches the
+    // end of the disk makes the whole disk look like a RAID member: a valid MBR wins then.
+    let raid = matches!(
         &whole.kind,
-        NodeKind::Detected {
-            status: Status::Unrecognized,
-            ..
-        }
-    ) {
+        NodeKind::Detected { status: Status::NotSupported(why), .. } if why == ident::RAID_MEMBER
+    );
+    if !raid
+        && !matches!(
+            &whole.kind,
+            NodeKind::Detected {
+                status: Status::Unrecognized,
+                ..
+            }
+        )
+    {
         return vec![whole];
     }
     match part::read_mbr(dev.as_ref(), 512) {
         Ok(Some(table)) => partition_nodes(&dev, &table),
         Ok(None) => vec![whole],
+        Err(_) if raid => vec![whole],
         Err(e) => vec![detected(
             "Partition table",
             dev.len(),
@@ -190,6 +199,25 @@ fn detected(name: &str, size: u64, status: Status) -> Node {
 mod tests {
     use super::*;
     use crate::dev::MemDev;
+
+    #[test]
+    fn a_raid_member_last_partition_does_not_hide_the_mbr() {
+        // md metadata 0.90 sits 64 KiB before the end of its partition. When the last
+        // partition reaches the end of the disk, the disk's own end shows the same superblock.
+        let len = 4usize << 20;
+        let mut disk = vec![0u8; len];
+        for (i, sys, start, sectors) in [(0, 0x83u8, 2048u32, 2048u32), (1, 0xFD, 4096, 4096)] {
+            let off = 446 + 16 * i;
+            disk[off + 4] = sys;
+            disk[off + 8..off + 12].copy_from_slice(&start.to_le_bytes());
+            disk[off + 12..off + 16].copy_from_slice(&sectors.to_le_bytes());
+        }
+        disk[510..512].copy_from_slice(&[0x55, 0xAA]);
+        disk[len - 65536..len - 65532].copy_from_slice(&0xA92B_4EFCu32.to_le_bytes());
+        let nodes = probe(Arc::new(MemDev(disk)));
+        let labels: Vec<_> = nodes.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(nodes.len(), 2, "{labels:?}");
+    }
 
     #[test]
     fn empty_device_is_one_unrecognized_leaf() {

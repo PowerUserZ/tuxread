@@ -37,6 +37,9 @@ pub struct ExtInfo {
 const HEAD: u64 = 256 * 1024;
 
 const RAID_MAGIC: u32 = 0xA92B_4EFC;
+
+/// What a Linux md RAID member is called; `probe` looks for it.
+pub const RAID_MEMBER: &str = "Linux RAID member";
 const ZFS_UBERBLOCK_MAGIC: u64 = 0x00BA_B10C;
 
 pub fn identify(dev: &dyn BlockDev) -> io::Result<Ident> {
@@ -57,7 +60,7 @@ pub fn identify(dev: &dyn BlockDev) -> io::Result<Ident> {
         || le32(&head, 4096) == Some(RAID_MAGIC)
         || raid_tail(dev)?
     {
-        return Ok(Ident::Other("Linux RAID member"));
+        return Ok(Ident::Other(RAID_MEMBER));
     }
     if at(0, b"XFSB") {
         return Ok(Ident::Xfs);
