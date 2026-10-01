@@ -12,7 +12,7 @@ use crate::checksum::Checksum;
 use crate::error::{CorruptKind, Ext4Error};
 use crate::features::{IncompatibleFeatures, ReadOnlyCompatibleFeatures};
 use crate::superblock::Superblock;
-use crate::util::{read_u16le, read_u32le, u64_from_hilo, usize_from_u32};
+use crate::util::{read_u16le, read_u32le, u64_from_hilo};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -130,8 +130,10 @@ impl BlockGroupDescriptor {
         sb: &Superblock,
         reader: &mut dyn Ext4Read,
     ) -> Result<Vec<Self>, Ext4Error> {
-        let mut block_group_descriptors =
-            Vec::with_capacity(usize_from_u32(sb.num_block_groups));
+        // TuxRead patch: grow as descriptors are read. `num_block_groups`
+        // comes from the superblock, so a corrupt one could reserve
+        // gigabytes before the first read fails.
+        let mut block_group_descriptors = Vec::new();
 
         for bgd_index in 0..sb.num_block_groups {
             let bgd = Self::read(sb, reader, bgd_index)?;
