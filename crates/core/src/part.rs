@@ -103,6 +103,18 @@ pub fn read_gpt(dev: &dyn BlockDev) -> Option<Table> {
 /// An MBR partition table (logical partitions included, extended containers left out).
 /// `Ok(None)`: no plausible MBR. `Err`: a protective MBR whose GPT is missing or damaged.
 pub fn read_mbr(dev: &dyn BlockDev, sector_size: u32) -> Result<Option<Table>> {
+    // Filesystem boot sectors also end in 55 AA; their "entries" are code, so start 0 gives them
+    // away. Checked before mbrman: 0.6.1 panics when every used entry starts at sector 0.
+    let mut sector0 = [0u8; 512];
+    if dev.read_exact_at(0, &mut sector0).is_err()
+        || sector0[446..510]
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .any(|e| e[4] != 0 && e[8..12] == [0; 4])
+    {
+        return Ok(None);
+    }
     let Some(mbr) = guarded(|| mbrman::MBR::read_from(&mut DevCursor::new(dev), sector_size).ok())
     else {
         return Ok(None);
@@ -116,12 +128,7 @@ pub fn read_mbr(dev: &dyn BlockDev, sector_size: u32) -> Result<Option<Table>> {
         .iter()
         .filter(|(_, p)| p.is_used() && !p.is_extended())
         .collect();
-    // Filesystem boot sectors also end in 55 AA; their "entries" are code, so start 0 gives them away.
-    if used.is_empty()
-        || used
-            .iter()
-            .any(|(_, p)| p.starting_lba == 0 || p.sectors == 0)
-    {
+    if used.is_empty() || used.iter().any(|(_, p)| p.sectors == 0) {
         return Ok(None);
     }
     let ss = u64::from(sector_size);
@@ -248,6 +255,34 @@ mod tests {
         assert_eq!(read_mbr(&MemDev(disk.clone()), 512).unwrap(), None);
         mbr_entry(&mut disk, 0, 0x83, 0, 10); // starts at sector 0
         assert_eq!(read_mbr(&MemDev(disk), 512).unwrap(), None);
+    }
+
+    /// Runs `f` and reports whether anything inside it panicked, even a panic caught by `guarded`
+    /// (libFuzzer aborts on those, so they must not happen).
+    fn panicked_inside<T>(f: impl FnOnce() -> T) -> (T, bool) {
+        use std::cell::Cell;
+        thread_local!(static PANICKED: Cell<bool> = const { Cell::new(false) });
+        static HOOK: std::sync::Once = std::sync::Once::new();
+        HOOK.call_once(|| {
+            let previous = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                PANICKED.set(true);
+                previous(info);
+            }));
+        });
+        PANICKED.set(false);
+        let out = f();
+        (out, PANICKED.get())
+    }
+
+    #[test]
+    fn entries_at_sector_zero_never_reach_mbrman() {
+        // Fuzz crash 85b9adeb: mbrman 0.6.1 panics (find_alignment) when every used entry starts at 0.
+        let mut disk = vec![0u8; 727];
+        mbr_entry(&mut disk, 2, 0x04, 0, 0);
+        let (result, panicked) = panicked_inside(|| read_mbr(&MemDev(disk), 512));
+        assert_eq!(result.unwrap(), None);
+        assert!(!panicked, "mbrman panicked inside read_mbr");
     }
 
     #[test]
