@@ -258,6 +258,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tuxread-cli"
+version = "0.1.0"
+dependencies = [
+ "tuxread-core",
+]
+
+[[package]]
 name = "tuxread-core"
 version = "0.1.0"
 dependencies = [
