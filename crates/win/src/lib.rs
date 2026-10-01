@@ -19,4 +19,6 @@ pub mod proto;
 #[cfg(windows)]
 pub mod disk;
 #[cfg(windows)]
+pub mod helper;
+#[cfg(windows)]
 mod sys;
