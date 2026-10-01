@@ -15,3 +15,8 @@
 
 pub mod align;
 pub mod proto;
+
+#[cfg(windows)]
+pub mod disk;
+#[cfg(windows)]
+mod sys;
