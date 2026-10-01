@@ -21,7 +21,10 @@ Changes (found by the TuxRead corpus, spec §7):
    filesystem. Test: `copy::tests::a_folder_that_contains_itself_is_skipped`.
 5. `src/superblock.rs`: `s_blocks_count_hi` only counts with the 64bit feature,
    like the kernel's `ext4_blocks_count`. Test: `tuxread_blocks_count_hi_needs_64bit`.
+6. `src/inode.rs` (found by the `ext` fuzz target): a symlink target longer than
+   one block is corrupt; 1.0.0 allocated the inode's size from disk (4 GiB).
+   Regression test: `crates/core/tests/fuzz_regressions.rs`.
 
-All five are to be proposed upstream as small, hand-written pull requests (the
+All six are to be proposed upstream as small, hand-written pull requests (the
 project requires the Google CLA). Delete this directory and the patch entry
-once a release contains all five changes.
+once a release contains all six changes.

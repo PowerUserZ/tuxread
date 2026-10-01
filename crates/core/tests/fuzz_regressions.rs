@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tuxread_core::dev::{BlockDev, MemDev};
-use tuxread_core::fs::FsInfo;
 use tuxread_core::fs::ext::ExtFs;
+use tuxread_core::fs::{Fs, FsInfo, Kind, join};
 use tuxread_core::part;
 use tuxread_core::probe::{self, NodeKind, Status};
 
@@ -22,6 +22,12 @@ unsafe impl GlobalAlloc for RecordLargest {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         LARGEST.fetch_max(layout.size(), Ordering::Relaxed);
         unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // The OS hands out zeroed pages lazily; the default would write every byte.
+        LARGEST.fetch_max(layout.size(), Ordering::Relaxed);
+        unsafe { System.alloc_zeroed(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -144,5 +150,39 @@ fn a_gpt_header_claiming_millions_of_entries_reserves_nothing() {
 
     let (table, largest) = largest_allocation(|| part::read_gpt(&MemDev(disk)));
     assert!(table.is_none());
+    assert!(largest < 64 << 20, "largest allocation: {largest} bytes");
+}
+
+/// Reads every symbolic link target below `dir`, as `ls` and the copy report do.
+fn read_links(fs: &dyn Fs, dir: &[u8], budget: &mut usize) {
+    let Ok(entries) = fs.read_dir(dir) else {
+        return;
+    };
+    for entry in entries {
+        if *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        let path = join(dir, &entry.name);
+        match entry.kind {
+            Kind::Symlink => {
+                let _ = fs.read_link(&path);
+            }
+            Kind::Dir => read_links(fs, &path, budget),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn a_symlink_claiming_gigabytes_is_not_read_into_memory() {
+    // Fuzz OOM 95ebf1dd: a symlink's size comes from its inode, and ext4-view read the
+    // target into a buffer of that size (4 GiB here).
+    let image = include_bytes!("data/fuzz-ext-oom-symlink.img");
+    let ((), largest) = largest_allocation(|| {
+        if let Ok(fs) = ExtFs::open(Arc::new(MemDev(image.to_vec())), FsInfo::default()) {
+            read_links(&fs, b"/", &mut 2000);
+        }
+    });
     assert!(largest < 64 << 20, "largest allocation: {largest} bytes");
 }

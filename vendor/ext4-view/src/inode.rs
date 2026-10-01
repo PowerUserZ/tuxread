@@ -327,6 +327,14 @@ impl Inode {
             PathBuf::try_from(target)
                 .map_err(|_| CorruptKind::SymlinkTarget(self.index).into())
         } else {
+            // TuxRead patch: the size comes from disk. Like the kernel
+            // (`ext4_symlink` refuses longer targets), a target is at most
+            // one block, so don't allocate for more.
+            if self.metadata.size_in_bytes
+                > ext4.0.superblock.block_size.to_u64()
+            {
+                return Err(CorruptKind::SymlinkTarget(self.index).into());
+            }
             let data = ext4.read_inode_file(self)?;
             PathBuf::try_from(data)
                 .map_err(|_| CorruptKind::SymlinkTarget(self.index).into())
