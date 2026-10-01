@@ -78,6 +78,14 @@ mod windows {
                 a_pipe_from_another_server_is_refused,
             ),
             (
+                "a_launched_helper_serves_and_exits_with_its_parent",
+                a_launched_helper_serves_and_exits_with_its_parent,
+            ),
+            (
+                "a_real_disk_reads_like_its_image",
+                a_real_disk_reads_like_its_image,
+            ),
+            (
                 "a_missing_disk_is_a_clear_error",
                 a_missing_disk_is_a_clear_error,
             ),
@@ -88,6 +96,10 @@ mod windows {
             (
                 "two_connections_read_at_the_same_time",
                 two_connections_read_at_the_same_time,
+            ),
+            (
+                "a_helper_that_dies_fails_reads_without_hanging",
+                a_helper_that_dies_fails_reads_without_hanging,
             ),
         ];
         let filter = args.iter().skip(1).find(|a| !a.starts_with('-'));
@@ -239,6 +251,67 @@ mod windows {
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
+    fn a_launched_helper_serves_and_exits_with_its_parent() {
+        let exe = std::env::current_exe().unwrap();
+        let extra = format!("--serve-image \"{}\"", image().display());
+        let launched = helper::launch(&exe, &extra, false).unwrap();
+        let disk = launched.open_disk(0).unwrap();
+        assert_eq!(read_b_txt(Arc::new(disk)), "beta\n");
+
+        // Lifetime: a helper whose parent exits, exits too.
+        let mut parent = Command::new(&exe)
+            .args(["--sleep-ms", "1500"])
+            .spawn()
+            .unwrap();
+        let mut child = Command::new(&exe)
+            .args([helper::FLAG, "--parent", &parent.id().to_string()])
+            .args(["--pipe", &helper::new_pipe_name().unwrap()])
+            .args(["--serve-image", &image().display().to_string()])
+            .spawn()
+            .unwrap();
+        parent.wait().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the helper outlived its parent"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Spec §7.4 "real disk": with `TUXREAD_TEST_DISK=<N>` and `TUXREAD_TEST_DISK_IMAGE=<raw
+    /// image>` set (disk N being that image, made into a VHD by `scripts/make-vhd.py` and
+    /// attached by `scripts/attach-vhd.ps1`), reads disk N through an elevated helper and
+    /// compares every byte with the image. Skipped when the variables are not set.
+    fn a_real_disk_reads_like_its_image() {
+        let (Ok(number), Ok(image)) = (
+            std::env::var("TUXREAD_TEST_DISK"),
+            std::env::var("TUXREAD_TEST_DISK_IMAGE"),
+        ) else {
+            println!("    skipped: TUXREAD_TEST_DISK and TUXREAD_TEST_DISK_IMAGE are not set");
+            return;
+        };
+        let exe = std::env::current_exe().unwrap();
+        let launched = helper::launch(&exe, "", true).unwrap();
+        let disk = launched.open_disk(number.parse().unwrap()).unwrap();
+        let mut file = std::fs::File::open(&image).unwrap();
+        let len = file.metadata().unwrap().len();
+        assert_eq!(disk.len(), len);
+        let (mut from_disk, mut from_image) = (vec![0u8; 4 << 20], vec![0u8; 4 << 20]);
+        let mut offset = 0;
+        while offset < len {
+            let n = (len - offset).min(4 << 20) as usize;
+            disk.read_exact_at(offset, &mut from_disk[..n]).unwrap();
+            file.read_exact(&mut from_image[..n]).unwrap();
+            assert!(
+                from_disk[..n] == from_image[..n],
+                "bytes differ in the 4 MiB at {offset}"
+            );
+            offset += n as u64;
+        }
+    }
+
     /// Runs `f` on a thread and fails if it does not finish within `secs` seconds.
     fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -310,5 +383,20 @@ mod windows {
         for reader in readers {
             reader.join().unwrap();
         }
+    }
+
+    fn a_helper_that_dies_fails_reads_without_hanging() {
+        let exe = std::env::current_exe().unwrap();
+        let extra = format!("--serve-image \"{}\"", image().display());
+        let launched = helper::launch(&exe, &extra, false).unwrap();
+        let disk = launched.open_disk(0).unwrap();
+        disk.read_exact_at(0, &mut [0u8; 512]).unwrap();
+        let killed = Command::new("taskkill")
+            .args(["/F", "/PID", &launched.pid().to_string()])
+            .output()
+            .unwrap();
+        assert!(killed.status.success());
+        let failed = within(10, move || disk.read_exact_at(0, &mut [0u8; 512]).is_err());
+        assert!(failed);
     }
 }

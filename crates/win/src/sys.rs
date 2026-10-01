@@ -272,3 +272,53 @@ pub fn pipe_server_pid(pipe: &File) -> io::Result<u32> {
     }
     Ok(pid)
 }
+
+impl Process {
+    pub fn id(&self) -> u32 {
+        use windows_sys::Win32::System::Threading::GetProcessId;
+        // SAFETY: the handle is a valid process handle.
+        unsafe { GetProcessId(self.0.as_raw_handle()) }
+    }
+
+    pub fn has_exited(&self) -> bool {
+        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+        // SAFETY: the handle has SYNCHRONIZE access.
+        unsafe { WaitForSingleObject(self.0.as_raw_handle(), 0) == WAIT_OBJECT_0 }
+    }
+}
+
+/// Starts `exe params` with a hidden window, through UAC (`runas`) when `elevate`.
+/// A declined UAC prompt fails with `ERROR_CANCELLED`.
+pub fn shell_execute(exe: &std::path::Path, params: &str, elevate: bool) -> io::Result<Process> {
+    use windows_sys::Win32::UI::Shell::{
+        SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+        ShellExecuteExW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+    let verb = wide(OsStr::new(if elevate { "runas" } else { "open" }));
+    let file = wide(exe.as_os_str());
+    let params = wide(OsStr::new(params));
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpVerb: verb.as_ptr(),
+        lpFile: file.as_ptr(),
+        lpParameters: params.as_ptr(),
+        nShow: SW_HIDE,
+        ..Default::default()
+    };
+    // SAFETY: `info` is fully initialized and every string it points to outlives the call.
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if info.hProcess.is_null() {
+        return Err(io::Error::other(
+            "no process handle for the started program",
+        ));
+    }
+    // SAFETY: SEE_MASK_NOCLOSEPROCESS hands us ownership of `hProcess`.
+    Ok(Process(unsafe {
+        OwnedHandle::from_raw_handle(info.hProcess)
+    }))
+}

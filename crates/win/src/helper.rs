@@ -345,3 +345,78 @@ mod tests {
         );
     }
 }
+
+/// A running helper, started by `launch`.
+pub struct Helper {
+    pipe: String,
+    process: Process,
+}
+
+#[derive(Debug)]
+pub enum LaunchError {
+    /// The user said no to the UAC prompt.
+    Declined,
+    Failed(io::Error),
+}
+
+impl std::fmt::Display for LaunchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LaunchError::Declined => write!(f, "administrator approval was declined"),
+            LaunchError::Failed(e) => write!(f, "could not start the disk helper: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for LaunchError {}
+
+/// Starts `exe --disk-helper ...` for this process, through UAC when `elevate`.
+/// `extra` is appended to the helper's command line.
+pub fn launch(exe: &std::path::Path, extra: &str, elevate: bool) -> Result<Helper, LaunchError> {
+    let pipe = new_pipe_name().map_err(LaunchError::Failed)?;
+    let params = format!(
+        "{FLAG} --parent {} --pipe {pipe} {extra}",
+        std::process::id()
+    );
+    match sys::shell_execute(exe, params.trim_end(), elevate) {
+        Ok(process) => Ok(Helper { pipe, process }),
+        Err(e) => Err(launch_error(e)),
+    }
+}
+
+fn launch_error(e: io::Error) -> LaunchError {
+    use windows_sys::Win32::Foundation::ERROR_CANCELLED;
+    if e.raw_os_error() == Some(ERROR_CANCELLED as i32) {
+        LaunchError::Declined
+    } else {
+        LaunchError::Failed(e)
+    }
+}
+
+impl Helper {
+    pub fn pid(&self) -> u32 {
+        self.process.id()
+    }
+
+    /// Opens disk `number` over a new connection; each `HelperDisk` has its own.
+    pub fn open_disk(&self, number: u32) -> io::Result<HelperDisk> {
+        HelperDisk::connect(&self.pipe, self.pid(), number, &|| {
+            !self.process.has_exited()
+        })
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    use windows_sys::Win32::Foundation::ERROR_CANCELLED;
+
+    #[test]
+    fn a_declined_uac_prompt_is_reported_as_declined() {
+        let declined = launch_error(io::Error::from_raw_os_error(ERROR_CANCELLED as i32));
+        assert!(matches!(declined, LaunchError::Declined));
+        assert_eq!(declined.to_string(), "administrator approval was declined");
+        let other = launch_error(io::Error::from_raw_os_error(2));
+        assert!(matches!(other, LaunchError::Failed(_)));
+    }
+}
