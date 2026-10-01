@@ -364,6 +364,7 @@ name = "tuxread-cli"
 version = "0.1.0"
 dependencies = [
  "tuxread-core",
+ "tuxread-win",
 ]
 
 [[package]]
