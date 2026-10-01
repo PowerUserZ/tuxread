@@ -1,0 +1,10 @@
+.temp_files/
+
+.wrongstack/
+!/.wrongstack/
+/.wrongstack/*
+!/.wrongstack/project.json
+/target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
