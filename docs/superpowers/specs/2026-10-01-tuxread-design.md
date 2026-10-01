@@ -167,7 +167,7 @@ Paths are absolute, `/`-separated Linux byte paths. Implementations: `ext` (an a
 
 | Area | Decision |
 |---|---|
-| ext2/3/4 | **Adopt** `ext4-view` 1.x (maintained by Nicholas Bishop): 149 tests, CI compared against the kernel, no `unsafe`. It refuses volumes using inline_data, meta_bg, largedir, ea_inode, dirdata, mmp, journal_dev or casefold; we report those as "not supported: <feature>". |
+| ext2/3/4 | **Adopt** `ext4-view` 1.x (maintained by Nicholas Bishop): 149 tests, CI compared against the kernel, no `unsafe`. It refuses volumes using inline_data, meta_bg, largedir, ea_inode, dirdata, mmp, journal_dev or casefold; we report those as "not supported: <feature>". During planning the corpus found two bugs in 1.0.0: timestamps before 1970 or after 2038 fail, and sparse ext2/ext3 files fail. Until upstream fixes them we build a vendored copy of the v1.0.0 tag with two small patches (`vendor/ext4-view`, see its `PATCHES.md`). |
 | GPT / MBR | **Adopt** `gptman` 3.x and `mbrman` 0.6. |
 | Cryptography | **Adopt** RustCrypto: `aes` 0.9, `xts-mode` 0.6, `cbc` 0.2, `pbkdf2` 0.13, `argon2` 0.6, `sha1`/`sha2` 0.11, `hmac` 0.13. Plus `zeroize` 1.x and `serde_json` 1.x. |
 | Compression | **Adopt** `flate2`/`miniz_oxide` for zlib, `ruzstd` for zstd and `lzokay` for LZO, all pure Rust. The btrfs LZO segment framing (about 40 lines) is ours. |
@@ -308,7 +308,7 @@ Disk or image
 
 ### 7.1 Corpus of real images
 
-- **Generation.** `scripts/make-corpus.sh` runs on Linux: the developer's WSL Ubuntu, or a GitHub Actions Ubuntu runner. It uses e2fsprogs, btrfs-progs, xfsprogs, cryptsetup, lvm2, qemu-utils, util-linux and dmsetup.
+- **Generation.** `scripts/make-corpus.sh` runs on Linux as root: the developer's WSL Ubuntu, or a GitHub Actions Ubuntu runner. It uses e2fsprogs, util-linux and Python 3 for v0.1; btrfs-progs, xfsprogs, cryptsetup, lvm2 and qemu-utils join in later milestones.
 - **Fixture tree.** Every image gets the same tree:
   - empty, small, 1 MiB random and 16 MiB random files (fixed seed);
   - a sparse file;
@@ -326,10 +326,10 @@ Disk or image
 
 | Milestone | Variants |
 |---|---|
-| v0.1 | `match`: ext2 (1 KiB blocks); ext3; ext4 default (64bit, metadata_csum, extents, flex_bg); ext4 without 64bit; ext4 with an unreplayed journal (crash simulated with dm-flakey, as xfstests does). `unsupported`: ext4 with inline_data; ext4 with casefold. ext4 with bigalloc: `match` if `ext4-view` reads it correctly, otherwise `unsupported`; this is checked once during planning and then fixed in the corpus definition. Containers, all `match`: GPT 512, GPT 4096, MBR with logical partitions, bare filesystem. |
+| v0.1 | `match`: ext2 (1 KiB blocks); ext3; ext4 default (64bit, metadata_csum, extents, flex_bg); ext4 without 64bit; ext4 with bigalloc (checked during planning: read correctly); ext4 with an unreplayed journal (image copied while mounted, after a sync; `needs_recovery` is verified). `unsupported`: ext4 with inline_data; ext4 with casefold (these are refused from the superblock, so they hold no files). Containers, all `match`: GPT 512, GPT 4096, MBR with logical partitions, bare filesystem. |
 | v0.2 | LUKS1 aes-xts-plain64 / PBKDF2; LUKS1 aes-cbc-essiv:sha256; LUKS2 default (Argon2id); LUKS2 PBKDF2-SHA512; LUKS2 with 4096-byte encryption sectors. LVM linear on one PV; linear spanning two PVs; striped over two PVs; Ubuntu layout (LUKS → LVM → ext4); thin LV (must report "not supported"). |
 | v0.3 | Btrfs single; DUP metadata; RAID1 over two devices; RAID0; zlib, lzo and zstd compression; subvolumes and a snapshot; inline files; crc32c, xxhash, sha256 and blake2 checksums. |
-| v0.4 | XFS v5 default (bigtime, reflink, ftype); XFS v4 if the installed mkfs.xfs still creates it; directories in every format; files with B-tree extent maps; a dirty log via dm-flakey. |
+| v0.4 | XFS v5 default (bigtime, reflink, ftype); XFS v4 if the installed mkfs.xfs still creates it; directories in every format; files with B-tree extent maps; a dirty log (image copied while mounted, as for ext4). |
 | v0.5 | QCOW2 (plain, zlib, zstd, with a backing file); VMDK (monolithicSparse, streamOptimized, twoGbMaxExtentSparse); VHDX (fixed, dynamic, differencing). |
 
 - **Storage.** Images are not committed to git. They are regenerated from the script and cached in CI.
@@ -440,6 +440,7 @@ Each milestone is a usable GitHub release.
 
 - **ext4-view gaps.**
   - Volumes using inline_data, meta_bg or casefold can't be read in v1.
+  - Two 1.0.0 bugs (timestamps outside 1970–2038, sparse ext2/ext3 files) are patched in our vendored copy; we drop the copy once upstream releases fixes.
   - Upstream contributions need Google's CLA, and the maintainer has rejected bulk AI-generated pull requests. Our contributions will be small and human-reviewed; a fork remains possible.
 - **ext4-view performance.** It reads one block per call and its seek is O(n). Copies read sequentially, and `CachedDev` batches device reads. If large-file throughput is still too low, we improve it upstream or in a fork.
 - **Btrfs scope.** RAID5/6 and degraded arrays depend on the v0.3 evaluation.
