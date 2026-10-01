@@ -16,7 +16,10 @@ Changes (found by the TuxRead corpus, spec §7):
    grows as descriptors are read. 1.0.0 reserved capacity for the superblock's
    block group count, so a 2 KB corrupt image asked for 24 GiB.
    Regression test: `crates/core/tests/fuzz_regressions.rs`.
+4. `src/metadata.rs`, `src/inode.rs`: `Metadata::inode()` returns the inode
+   number, so the copy engine can recognise a folder loop in a damaged
+   filesystem. Test: `copy::tests::a_folder_that_contains_itself_is_skipped`.
 
-All three are to be proposed upstream as small, hand-written pull requests (the
+All four are to be proposed upstream as small, hand-written pull requests (the
 project requires the Google CLA). Delete this directory and the patch entry
-once a release contains all three fixes.
+once a release contains all four changes.

@@ -32,6 +32,8 @@ pub struct Entry {
     pub mode: u32,
     pub uid: u32,
     pub gid: u32,
+    /// Inode number, 0 when unknown. Tells hard links and directory loops apart.
+    pub ino: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

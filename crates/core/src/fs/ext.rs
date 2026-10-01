@@ -62,6 +62,7 @@ fn entry(name: Vec<u8>, m: &Metadata) -> Entry {
         mode: u32::from(m.mode()) & 0o7777,
         uid: m.uid(),
         gid: m.gid(),
+        ino: u64::from(m.inode()),
     }
 }
 

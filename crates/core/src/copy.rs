@@ -1,14 +1,14 @@
 //! Copying files out of a Linux filesystem into a Windows folder (spec §6.2).
 
 use std::collections::HashSet;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::fs::{Fs, Kind, Timestamp, join};
-use crate::sanitize::sanitize;
+use crate::fs::{Entry, Fs, Kind, Timestamp, join};
+use crate::sanitize::{MAX_UTF16, sanitize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Conflict {
@@ -76,6 +76,8 @@ pub fn copy_out(
         on_progress,
         progress: Progress::default(),
         report: Report::default(),
+        levels: Vec::new(),
+        copied_dirs: HashSet::new(),
     };
     let mut taken = Taken::new(dest_dir);
     for src in sources {
@@ -84,12 +86,25 @@ pub fn copy_out(
         }
         if src.iter().all(|&b| b == b'/') {
             // The root has no name of its own: copy what it contains.
-            copier.copy_children(src, dest_dir, 0);
+            if let Ok(root) = fs.stat(src) {
+                copier.copied_dirs.insert(root.ino);
+            }
+            copier.enter(src.clone(), dest_dir.to_path_buf());
         } else {
             copier.copy_entry(src, dest_dir, &mut taken, 0);
         }
+        copier.walk();
     }
     copier.report
+}
+
+/// A folder whose entries are being copied. Folders are walked with an explicit stack of
+/// these, so a deeply nested (or damaged) tree cannot overflow the thread's stack.
+struct Level {
+    src: Vec<u8>,
+    dest: PathBuf,
+    taken: Taken,
+    children: std::vec::IntoIter<Entry>,
 }
 
 /// Names in one destination folder, compared the way Windows does (case-insensitively).
@@ -119,14 +134,35 @@ impl Taken {
         !self.existing.contains(&key) && !self.created.contains(&key)
     }
 
-    /// "name (2).ext", "name (3).ext", ... — the first one not taken.
+    /// "name (2).ext", "name (3).ext", ... — the first one not taken. The stem is cut first,
+    /// so the number always fits in the 255-unit name limit and every candidate differs.
     fn unique(&self, name: &str, is_dir: bool) -> String {
         let (stem, ext) = match name.rfind('.') {
-            Some(dot) if dot > 0 && !is_dir => name.split_at(dot),
+            Some(dot)
+                if dot > 0
+                    && !is_dir
+                    && name
+                        .get(dot..)
+                        .is_some_and(|ext| ext.encode_utf16().count() <= 32) =>
+            {
+                name.split_at(dot)
+            }
             _ => (name, ""),
         };
         (2u64..)
-            .map(|n| sanitize(format!("{stem} ({n}){ext}").as_bytes()))
+            .map(|n| {
+                let tail = format!(" ({n}){ext}");
+                let room = MAX_UTF16.saturating_sub(tail.encode_utf16().count());
+                let mut used = 0;
+                let stem: String = stem
+                    .chars()
+                    .take_while(|c| {
+                        used += c.len_utf16();
+                        used <= room
+                    })
+                    .collect();
+                stem + &tail
+            })
             .find(|candidate| self.is_free(candidate))
             .unwrap_or_else(|| name.to_string())
     }
@@ -145,6 +181,10 @@ struct Copier<'a> {
     on_progress: &'a mut dyn FnMut(&Progress),
     progress: Progress,
     report: Report,
+    /// Folders being copied, innermost last.
+    levels: Vec<Level>,
+    /// Inode numbers of the folders copied so far: a folder reached twice is a loop.
+    copied_dirs: HashSet<u64>,
 }
 
 impl Copier<'_> {
@@ -240,6 +280,17 @@ impl Copier<'_> {
             Kind::File | Kind::Dir => {}
         }
         let is_dir = entry.kind == Kind::Dir;
+        // Linux never links a folder twice, so a second visit means a damaged filesystem;
+        // following it could copy forever.
+        if is_dir && entry.ino != 0 && !self.copied_dirs.insert(entry.ino) {
+            return self.record(
+                shown,
+                None,
+                Outcome::Skipped {
+                    reason: "folder loop: this folder was already copied".into(),
+                },
+            );
+        }
         let (name, reuse) = match self.plan(&entry.name, is_dir, taken) {
             Plan::Use { name, reuse } => (name, reuse),
             Plan::Skip(reason) => return self.record(shown, None, Outcome::Skipped { reason }),
@@ -264,7 +315,7 @@ impl Copier<'_> {
                 );
             }
             self.record(shown, Some(dest.clone()), ok);
-            self.copy_children(src, &dest, depth);
+            self.enter(src.to_vec(), dest);
         } else {
             let outcome = match self.copy_file(src, &dest, reuse, entry.mtime) {
                 Ok(true) => ok,
@@ -279,32 +330,54 @@ impl Copier<'_> {
         }
     }
 
-    /// Copies the entries of folder `src` into `dest`.
-    fn copy_children(&mut self, src: &[u8], dest: &Path, depth: usize) {
-        let mut children = match self.fs.read_dir(src) {
-            Ok(children) => children,
+    /// Queues the entries of folder `src` for copying into `dest`.
+    fn enter(&mut self, src: Vec<u8>, dest: PathBuf) {
+        match self.fs.read_dir(&src) {
+            Ok(mut children) => {
+                children.sort_by(|a, b| a.name.cmp(&b.name));
+                let taken = Taken::new(&dest);
+                self.levels.push(Level {
+                    src,
+                    dest,
+                    taken,
+                    children: children.into_iter(),
+                });
+            }
             Err(e) => {
-                let source = String::from_utf8_lossy(src).into_owned();
-                return self.record(
+                let source = String::from_utf8_lossy(&src).into_owned();
+                self.record(
                     source,
-                    Some(dest.to_path_buf()),
+                    Some(dest),
                     Outcome::Failed {
                         reason: e.to_string(),
                     },
                 );
             }
-        };
-        children.sort_by(|a, b| a.name.cmp(&b.name));
-        let mut taken = Taken::new(dest);
-        for child in children {
-            if self.cancelled() {
-                return;
-            }
-            self.copy_entry(&join(src, &child.name), dest, &mut taken, depth + 1);
         }
     }
 
-    /// `Ok(false)` when cancelled; the partial file is removed.
+    /// Copies everything queued by `enter`, depth first.
+    fn walk(&mut self) {
+        while let Some(mut level) = self.levels.pop() {
+            if self.cancelled() {
+                self.levels.clear();
+                return;
+            }
+            let Some(child) = level.children.next() else {
+                continue;
+            };
+            let src = join(&level.src, &child.name);
+            let depth = self.levels.len() + 1;
+            let below = self.levels.len();
+            self.copy_entry(&src, &level.dest, &mut level.taken, depth);
+            // A child folder was queued at `below`; its parent goes back underneath it.
+            self.levels.insert(below, level);
+        }
+    }
+
+    /// `Ok(false)` when cancelled. A new file is written in place. An existing file
+    /// (Overwrite) is written beside it and swapped in at the end, so a failure or a cancel
+    /// leaves the old file as it was. Nothing partial stays behind either way.
     fn copy_file(
         &mut self,
         src: &[u8],
@@ -316,30 +389,44 @@ impl Copier<'_> {
             .fs
             .open(src)
             .map_err(|e| io::Error::other(e.to_string()))?;
-        let mut options = OpenOptions::new();
-        options.write(true);
-        if replace {
-            options.create(true).truncate(true)
+        let (path, mut file) = if replace {
+            temp_file_beside(dest)?
         } else {
-            options.create_new(true)
+            let file = OpenOptions::new().write(true).create_new(true).open(dest)?;
+            (dest.to_path_buf(), file)
         };
-        let mut file = options.open(dest)?;
+        let result = self.pump(&mut *reader, &mut file, mtime);
+        drop(file);
+        let result = match result {
+            Ok(true) if replace => std::fs::rename(&path, dest).map(|()| true),
+            other => other,
+        };
+        if matches!(result, Ok(true)) {
+            self.progress.files += 1;
+            (self.on_progress)(&self.progress);
+        } else {
+            let _ = std::fs::remove_file(&path); // keep the copy's error, not a cleanup error
+        }
+        result
+    }
+
+    /// Copies `reader` into `file` chunk by chunk; `Ok(false)` when cancelled.
+    fn pump(
+        &mut self,
+        reader: &mut dyn Read,
+        file: &mut File,
+        mtime: Option<Timestamp>,
+    ) -> io::Result<bool> {
         let mut buf = vec![0u8; CHUNK];
         loop {
             if self.cancelled() {
-                drop(file);
-                std::fs::remove_file(dest)?;
                 return Ok(false);
             }
             let n = match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => {
-                    drop(file);
-                    let _ = std::fs::remove_file(dest); // keep the read error, not a cleanup error
-                    return Err(e);
-                }
+                Err(e) => return Err(e),
             };
             file.write_all(buf.get(..n).unwrap_or_default())?;
             self.progress.bytes += n as u64;
@@ -349,9 +436,21 @@ impl Copier<'_> {
             // NTFS cannot store some Linux times (e.g. before 1601); the data is what matters.
             let _ = file.set_modified(time);
         }
-        self.progress.files += 1;
-        (self.on_progress)(&self.progress);
         Ok(true)
+    }
+}
+
+/// A new, uniquely named file next to `dest`, for Overwrite to write into.
+fn temp_file_beside(dest: &Path) -> io::Result<(PathBuf, File)> {
+    let dir = dest.parent().unwrap_or(Path::new(""));
+    let mut n = 0u32;
+    loop {
+        let path = dir.join(format!("~tuxread-{}-{n}.partial", std::process::id()));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+            Err(e) => return Err(e),
+        }
     }
 }
 
@@ -400,6 +499,7 @@ mod tests {
                 mode: 0o644,
                 uid: 0,
                 gid: 0,
+                ino: self.nodes.len() as u64 + 1,
             };
             self.nodes.insert(path.to_vec(), (entry, data.to_vec()));
         }
@@ -656,6 +756,140 @@ mod tests {
             "{:?}",
             report.items
         );
+    }
+
+    #[test]
+    fn colliding_names_at_the_length_limit_still_get_numbered() {
+        let long = "x".repeat(251) + ".txt"; // 255 UTF-16 units, the NTFS limit
+        let mut fs = MemFs::new();
+        fs.add(b"/w", Kind::Dir, b"");
+        fs.add(format!("/w/{long}").as_bytes(), Kind::File, b"1");
+        fs.add(
+            format!("/w/{}", long.to_uppercase()).as_bytes(),
+            Kind::File,
+            b"2",
+        );
+        let dest = temp_dir("long-collide");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(run(&fs, &[b"/w"], &dest, Conflict::KeepBoth)));
+        let report = rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the copy never finished");
+        let renamed = report
+            .items
+            .iter()
+            .find_map(|i| match &i.outcome {
+                Outcome::Renamed { to } => Some(to.clone()),
+                _ => None,
+            })
+            .expect("one of the two files is renamed");
+        assert_eq!(renamed.encode_utf16().count(), 255);
+        assert!(renamed.ends_with("x (2).txt"), "{renamed}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_failed_write_removes_the_partial_file() {
+        // Windows byte-range locks are mandatory: locking the file after the first chunk
+        // makes the next write fail, as a full disk would.
+        let mut fs = MemFs::new();
+        fs.add(b"/big.bin", Kind::File, &vec![1u8; 4 * CHUNK]);
+        let dest = temp_dir("write-fails");
+        let target = dest.join("big.bin");
+        let mut lock = None;
+        let report = copy_out(
+            &fs,
+            &[b"/big.bin".to_vec()],
+            &dest,
+            Conflict::KeepBoth,
+            &AtomicBool::new(false),
+            &mut |p| {
+                if p.bytes > 0 && lock.is_none() {
+                    let file = std::fs::File::open(&target).unwrap();
+                    file.lock().unwrap();
+                    lock = Some(file);
+                }
+            },
+        );
+        drop(lock);
+        assert!(
+            matches!(report.items[0].outcome, Outcome::Failed { .. }),
+            "{:?}",
+            report.items
+        );
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn a_cancelled_overwrite_keeps_the_old_file() {
+        let mut fs = MemFs::new();
+        fs.add(b"/note.txt", Kind::File, &vec![1u8; 4 * CHUNK]);
+        let dest = temp_dir("overwrite-cancel");
+        std::fs::write(dest.join("note.txt"), "old").unwrap();
+        let cancel = AtomicBool::new(false);
+        let report = copy_out(
+            &fs,
+            &[b"/note.txt".to_vec()],
+            &dest,
+            Conflict::Overwrite,
+            &cancel,
+            &mut |p| {
+                if p.bytes > 0 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+        );
+        assert!(report.cancelled);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("note.txt")).unwrap(),
+            "old"
+        );
+        assert_eq!(
+            std::fs::read_dir(&dest).unwrap().count(),
+            1,
+            "temporary file left"
+        );
+    }
+
+    #[test]
+    fn a_folder_that_contains_itself_is_skipped() {
+        let mut fs = MemFs::new();
+        fs.add(b"/a", Kind::Dir, b"");
+        fs.add(b"/a/f.txt", Kind::File, b"x");
+        fs.add(b"/a/loop", Kind::Dir, b"");
+        // A damaged filesystem: "loop" is folder "a" again.
+        let a = fs.nodes[b"/a".as_slice()].0.ino;
+        fs.nodes.get_mut(b"/a/loop".as_slice()).unwrap().0.ino = a;
+        let dest = temp_dir("loop");
+        let report = run(&fs, &[b"/a"], &dest, Conflict::KeepBoth);
+        let looped = report.items.iter().find(|i| i.source == "/a/loop").unwrap();
+        assert!(
+            matches!(&looped.outcome, Outcome::Skipped { reason } if reason.contains("loop")),
+            "{looped:?}"
+        );
+        assert!(!dest.join("a/loop").exists());
+        assert_eq!(std::fs::read(dest.join("a/f.txt")).unwrap(), b"x");
+    }
+
+    #[test]
+    fn deep_folders_copy_on_a_small_stack() {
+        // A damaged image can nest folders a thousand deep; a stack frame per level would
+        // overflow the thread's stack and kill the process.
+        let mut fs = MemFs::new();
+        let mut path = Vec::new();
+        for _ in 0..1000 {
+            path.extend_from_slice(b"/d");
+            fs.add(&path, Kind::Dir, b"");
+        }
+        let dest = temp_dir("deep");
+        let report = std::thread::Builder::new()
+            .stack_size(256 << 10)
+            .spawn(move || run(&fs, &[b"/d"], &dest, Conflict::KeepBoth))
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(report.items.len(), 1000);
+        assert!(report.items.iter().all(|i| i.outcome == Outcome::Copied));
     }
 
     #[test]

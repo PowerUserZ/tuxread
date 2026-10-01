@@ -245,6 +245,7 @@ impl Inode {
                     ctime,
                     mtime,
                     crtime,
+                    inode: index.get(),
                 },
                 flags: InodeFlags::from_bits_retain(i_flags),
                 checksum_base,

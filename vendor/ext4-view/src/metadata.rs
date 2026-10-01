@@ -40,9 +40,19 @@ pub struct Metadata {
     /// Creation time.
     /// Only present if inode is large enough.
     pub(crate) crtime: Option<Timestamp>,
+
+    /// TuxRead patch: inode number, so callers can tell hard links and
+    /// directory loops apart.
+    pub(crate) inode: u32,
 }
 
 impl Metadata {
+    /// Get the inode number.
+    #[must_use]
+    pub fn inode(&self) -> u32 {
+        self.inode
+    }
+
     /// Get the file type.
     #[must_use]
     pub fn file_type(&self) -> FileType {
