@@ -33,23 +33,14 @@ pub const BASIC_DATA: [u8; 16] = [
     0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, 0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7,
 ];
 
-/// True when Windows does not mount a filesystem in a partition of this type. Windows' own
-/// system partitions (EFI system, reserved, recovery) do not count: they are Windows'
-/// business, so TuxRead suggests nothing for them.
+/// True for the type Linux tools give a new partition (GPT "Linux filesystem", MBR 0x83), which
+/// Windows does not mount. Only this one: other types that Windows skips hide a filesystem on
+/// purpose (dynamic disks, Storage Spaces, OEM recovery) or belong to another owner, and
+/// changing them would let Windows mount, and perhaps "repair", what that owner manages.
 pub fn hides_from_windows(code: TypeCode) -> bool {
     match code {
-        TypeCode::Gpt(guid) => !matches!(
-            guid_string(&guid).as_str(),
-            "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7" // Basic data
-                | "C12A7328-F81F-11D2-BA4B-00A0C93EC93B" // EFI system
-                | "E3C9E316-0B5C-4DB8-817D-F92DF00215AE" // Microsoft reserved
-                | "DE94BBA4-06D1-4D40-A16A-BFD50179D6AC" // Windows recovery
-        ),
-        // FAT12/16/32 and NTFS/exFAT/ReFS, then Windows recovery and EFI system.
-        TypeCode::Mbr(sys) => !matches!(
-            sys,
-            0x01 | 0x04 | 0x06 | 0x07 | 0x0B | 0x0C | 0x0E | 0x27 | 0xEF
-        ),
+        TypeCode::Gpt(guid) => guid_string(&guid) == "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
+        TypeCode::Mbr(sys) => sys == 0x83,
     }
 }
 

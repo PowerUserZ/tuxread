@@ -91,6 +91,23 @@ pub fn identify(dev: &dyn BlockDev) -> io::Result<Ident> {
     {
         return Ok(Ident::Other("Linux swap"));
     }
+    // HFS+ and ZFS leave sector 0 as it was, so a Windows boot sector there may be stale.
+    if at(1024, b"H+") || at(1024, b"HX") {
+        return Ok(Ident::Other("HFS+"));
+    }
+    let uberblock = |k: usize| {
+        let b: [u8; 8] = head
+            .get(0x2_0000 + k * 1024..0x2_0008 + k * 1024)?
+            .try_into()
+            .ok()?;
+        Some(
+            u64::from_le_bytes(b) == ZFS_UBERBLOCK_MAGIC
+                || u64::from_be_bytes(b) == ZFS_UBERBLOCK_MAGIC,
+        )
+    };
+    if (0..128).any(|k| uberblock(k) == Some(true)) {
+        return Ok(Ident::Other("ZFS member"));
+    }
     if at(3, b"NTFS    ") {
         return Ok(Ident::Windows("NTFS"));
     }
@@ -108,22 +125,6 @@ pub fn identify(dev: &dyn BlockDev) -> io::Result<Ident> {
     }
     if at(32, b"NXSB") {
         return Ok(Ident::Other("APFS"));
-    }
-    if at(1024, b"H+") || at(1024, b"HX") {
-        return Ok(Ident::Other("HFS+"));
-    }
-    let uberblock = |k: usize| {
-        let b: [u8; 8] = head
-            .get(0x2_0000 + k * 1024..0x2_0008 + k * 1024)?
-            .try_into()
-            .ok()?;
-        Some(
-            u64::from_le_bytes(b) == ZFS_UBERBLOCK_MAGIC
-                || u64::from_be_bytes(b) == ZFS_UBERBLOCK_MAGIC,
-        )
-    };
-    if (0..128).any(|k| uberblock(k) == Some(true)) {
-        return Ok(Ident::Other("ZFS member"));
     }
     Ok(Ident::Unknown)
 }

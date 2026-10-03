@@ -398,6 +398,62 @@ mod tests {
         assert_eq!(gpt_status(EFI, fat), Status::WindowsCanOpen);
     }
 
+    /// Only the Linux type is a mistake TuxRead may suggest undoing. Other types hide a Windows
+    /// boot sector on purpose (dynamic disks, Storage Spaces, OEM recovery), or the boot sector is
+    /// stale under another filesystem (ZFS keeps sector 0 as it was): changing them would let
+    /// Windows mount, and perhaps "repair", what another owner manages.
+    #[test]
+    fn no_fix_is_offered_for_types_that_hide_on_purpose() {
+        const LDM_DATA: [u8; 16] = [
+            0xA0, 0x60, 0x9B, 0xAF, 0x31, 0x14, 0x62, 0x4F, 0xBC, 0x68, 0x33, 0x11, 0x71, 0x4A,
+            0x69, 0xAD,
+        ];
+        const STORAGE_SPACES: [u8; 16] = [
+            0x8F, 0xAF, 0x5C, 0xE7, 0x80, 0xF6, 0xEE, 0x4C, 0xAF, 0xA3, 0xB0, 0x01, 0xE5, 0x6E,
+            0xFC, 0x2D,
+        ];
+        const ZFS: [u8; 16] = [
+            0xC3, 0x8C, 0x89, 0x6A, 0xD2, 0x1D, 0xB2, 0x11, 0x99, 0xA6, 0x08, 0x00, 0x20, 0x73,
+            0x66, 0x31,
+        ];
+        let ntfs: &[(usize, &[u8])] = &[(3, b"NTFS    ")];
+        assert_eq!(gpt_status(LDM_DATA, ntfs), Status::WindowsCanOpen);
+        assert_eq!(gpt_status(STORAGE_SPACES, ntfs), Status::WindowsCanOpen);
+        let zfs = 0x00BA_B10Cu64.to_le_bytes();
+        let zfs_over_ntfs: &[(usize, &[u8])] = &[(3, b"NTFS    "), (0x2_0000, &zfs)];
+        let zfs_member = Status::NotSupported("ZFS member".into());
+        assert_eq!(gpt_status(ZFS, zfs_over_ntfs), zfs_member);
+        assert_eq!(gpt_status(LINUX, zfs_over_ntfs), zfs_member);
+        let hfs_over_ntfs: &[(usize, &[u8])] = &[(3, b"NTFS    "), (1024, b"H+")];
+        assert_eq!(
+            gpt_status(LINUX, hfs_over_ntfs),
+            Status::NotSupported("HFS+".into())
+        );
+        for sys in [0x42, 0x17, 0x12, 0x27] {
+            assert_eq!(
+                mbr_status(sys, ntfs),
+                Status::WindowsCanOpen,
+                "type {sys:#x}"
+            );
+        }
+    }
+
+    /// The status of what an MBR disk's one partition (type `sys`, at 1 MiB) holds.
+    fn mbr_status(sys: u8, content: &[(usize, &[u8])]) -> Status {
+        let mut disk = vec![0u8; 2 * 1024 * 1024];
+        disk[446 + 4] = sys;
+        disk[446 + 8..446 + 12].copy_from_slice(&2048u32.to_le_bytes());
+        disk[446 + 12..446 + 16].copy_from_slice(&2048u32.to_le_bytes());
+        disk[510..512].copy_from_slice(&[0x55, 0xAA]);
+        for (at, bytes) in content {
+            disk[(1 << 20) + at..(1 << 20) + at + bytes.len()].copy_from_slice(bytes);
+        }
+        match &leaves(&probe(Arc::new(MemDev(disk))))[0].kind {
+            NodeKind::Detected { status, .. } => status.clone(),
+            _ => panic!("not a detected leaf"),
+        }
+    }
+
     /// In an MBR, FAT needs the FAT32 (LBA) type; NTFS and exFAT share 0x07.
     #[test]
     fn an_mbr_fix_picks_the_type_for_the_filesystem() {
