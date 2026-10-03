@@ -2,7 +2,6 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "TuxRead",
   "mainBinaryName": "TuxRead",
-  "version": "0.1.0",
   "identifier": "io.github.poweruserz.tuxread",
   "build": {
     "frontendDist": "../dist",
@@ -29,6 +28,8 @@
   },
   "bundle": {
     "active": false,
+    "publisher": "TuxRead",
+    "copyright": "Copyright (c) 2026 the TuxRead authors",
     "icon": ["icons/icon.ico", "icons/icon.png"]
   }
 }

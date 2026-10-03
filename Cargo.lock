@@ -3904,6 +3904,7 @@ dependencies = [
 name = "tuxread-cli"
 version = "0.1.0"
 dependencies = [
+ "tauri-winres",
  "tuxread-core",
  "tuxread-win",
 ]

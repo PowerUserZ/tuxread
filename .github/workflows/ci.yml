@@ -113,6 +113,8 @@ jobs:
           "identical: $($a.Count) files"
           Dismount-DiskImage -ImagePath $vhd | Out-Null
       - run: npx tauri build --no-bundle
+      - name: GUI probe (trial)
+        run: ./scripts/ci-gui-probe.ps1 target\release\TuxRead.exe
       - name: Smoke test the window
         # The disk scenario needs a helper; this runner is elevated and reads disks directly.
         run: node scripts/smoke/run.mjs target\release\TuxRead.exe harden browse copy

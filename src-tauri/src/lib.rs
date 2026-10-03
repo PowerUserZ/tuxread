@@ -167,7 +167,19 @@ async fn diagnostics(ctx: Ctx<'_>) -> CmdResult<String> {
     blocking(ctx, |s| Ok(diagnostics::diagnostics(&s.app))).await
 }
 
+/// Shown when the WebView2 runtime is missing (spec §9), in both of the app's languages: the
+/// window, which knows the chosen language, cannot open without it.
+const NO_WEBVIEW2: &str = "TuxRead needs the Microsoft Edge WebView2 Runtime, which is not installed for this account. Download it from https://developer.microsoft.com/microsoft-edge/webview2, install it, and start TuxRead again.
+
+TuxRead, bu hesapta kurulu olmayan Microsoft Edge WebView2 Runtime'a ihtiyaç duyar. https://developer.microsoft.com/microsoft-edge/webview2 adresinden indirip kurun, sonra TuxRead'i yeniden başlatın.";
+
 pub fn run() {
+    // Without the runtime Tauri shows its own error but then keeps running, windowless.
+    if let Err(e) = tauri::webview_version() {
+        log::error!("no WebView2 runtime: {e}");
+        tuxread_win::show_error("TuxRead", NO_WEBVIEW2);
+        std::process::exit(1);
+    }
     let logs = tauri_plugin_log::Builder::new()
         .target(tauri_plugin_log::Target::new(
             tauri_plugin_log::TargetKind::LogDir {
@@ -205,5 +217,23 @@ pub fn run() {
     if let Err(e) = result {
         log::error!("TuxRead failed: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// One version everywhere (spec §9): Cargo.toml gives it to both executables' version
+    /// resources, the installer and the diagnostics; package.json gives it to About.
+    #[test]
+    fn the_version_comes_from_cargo_toml_alone() {
+        let package: serde_json::Value =
+            serde_json::from_str(include_str!("../../package.json")).unwrap();
+        assert_eq!(package["version"], env!("CARGO_PKG_VERSION"));
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert!(
+            config.get("version").is_none(),
+            "tauri.conf.json must not set its own version; Tauri then uses Cargo.toml's"
+        );
     }
 }
