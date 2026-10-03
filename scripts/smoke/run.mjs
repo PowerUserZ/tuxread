@@ -3,6 +3,8 @@
 // The scenarios are the other .mjs files in this folder; with no names given, all of them run.
 // Each scenario gets a fresh app with a throwaway WebView2 profile, so it starts in a known state
 // and leaves the user's own TuxRead settings alone.
+// WebView2 ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS in an elevated process. Run it from an
+// unelevated console, or against a build whose configuration asks for the port (as CI does).
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

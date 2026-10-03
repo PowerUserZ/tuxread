@@ -9,6 +9,9 @@ TuxRead browses and copies files from Linux disks and disk images on Windows, an
 This release is not code-signed yet, so Windows SmartScreen may warn the first time: choose "More info", then "Run anyway".
 
 **Code signing policy**
+
 Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
 Committers, reviewers and approvers: the repository owner (the project currently has a single maintainer).
+
 Privacy policy: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.

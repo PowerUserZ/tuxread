@@ -174,9 +174,9 @@ const NO_WEBVIEW2: &str = "TuxRead needs the Microsoft Edge WebView2 Runtime, wh
 TuxRead, bu hesapta kurulu olmayan Microsoft Edge WebView2 Runtime'a ihtiyaç duyar. https://developer.microsoft.com/microsoft-edge/webview2 adresinden indirip kurun, sonra TuxRead'i yeniden başlatın.";
 
 pub fn run() {
-    // Without the runtime Tauri shows its own error but then keeps running, windowless.
-    if let Err(e) = tauri::webview_version() {
-        log::error!("no WebView2 runtime: {e}");
+    // Without the runtime Tauri shows its own error but then keeps running, windowless. This runs
+    // before the log exists, so the message box is the only report.
+    if tauri::webview_version().is_err() {
         tuxread_win::show_error("TuxRead", NO_WEBVIEW2);
         std::process::exit(1);
     }

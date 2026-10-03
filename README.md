@@ -15,9 +15,11 @@ Get TuxRead from [GitHub Releases](https://github.com/PowerUserZ/tuxread/release
 has, for 64-bit Intel/AMD (x64) and ARM64 PCs:
 
 - `TuxRead-<version>-<arch>-setup.exe`: an installer for your account only, with no
-  administrator rights needed. It installs the Microsoft Edge WebView2 Runtime if it is missing.
+  administrator rights needed. If the Microsoft Edge WebView2 Runtime is missing, it downloads
+  and installs it.
 - `TuxRead-<version>-<arch>-portable.zip`: `TuxRead.exe` and the command-line `tuxread-cli.exe`,
-  to run from any folder.
+  to run from any folder. The window needs the WebView2 Runtime, which Windows 11 includes;
+  without it, TuxRead says where to get it.
 - `TuxRead-<version>-<arch>.sha256`: the files' SHA-256 checksums.
 
 Releases are not code-signed yet (see the code signing policy below), so Windows SmartScreen may
@@ -54,8 +56,11 @@ TuxRead makes no network requests. It keeps a log in
 ## Code signing policy
 
 > **Code signing policy**
+>
 > Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+>
 > Committers, reviewers and approvers: the repository owner (the project currently has a single maintainer).
+>
 > Privacy policy: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
 
 Version 0.1 ships unsigned: SignPath Foundation signs projects once they have been released.

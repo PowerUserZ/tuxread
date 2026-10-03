@@ -112,11 +112,20 @@ jobs:
           if (Compare-Object $a $b) { Write-Error "the disk and the image copies differ"; exit 1 }
           "identical: $($a.Count) files"
           Dismount-DiskImage -ImagePath $vhd | Out-Null
-      - run: npx tauri build --no-bundle
-      - name: GUI probe (trial)
-        run: ./scripts/ci-gui-probe.ps1 target\release\TuxRead.exe
+      - name: Build the window, with a DevTools port for the smoke test
+        # The runner is elevated, and WebView2 ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS in an
+        # elevated process. So this build asks for the port in its own configuration: Tauri's
+        # default browser arguments plus the port. Release builds never have it.
+        run: |
+          $window = (Get-Content src-tauri\tauri.conf.json -Raw | ConvertFrom-Json).app.windows[0]
+          $window | Add-Member additionalBrowserArgs '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=0'
+          @{ app = @{ windows = @($window) } } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\smoke.json"
+          npx tauri build --no-bundle --config "$env:RUNNER_TEMP\smoke.json"
+      - name: Without WebView2, a message box (spec §9)
+        run: ./scripts/check-no-webview2.ps1 target\release\TuxRead.exe
       - name: Smoke test the window
-        # The disk scenario needs a helper; this runner is elevated and reads disks directly.
+        # The disk scenario stays a release-checklist step: it needs a UAC prompt, and on this
+        # elevated runner the window reads disks without the helper.
         run: node scripts/smoke/run.mjs target\release\TuxRead.exe harden browse copy
         env:
           TUXREAD_SMOKE_BIG: ${{ github.workspace }}\corpus\ext4.img

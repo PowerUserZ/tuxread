@@ -3,9 +3,11 @@
 # - the zip holds exactly the program, the CLI, the README and the license files;
 # - both executables are built for the architecture and carry ProductName "TuxRead" and the
 #   release's version, as the installer does;
-# - the license file names the window's and the engine's components.
-# With -Install it also installs per user without a prompt, checks the installed files, and
-# uninstalls again (CI only: it changes the current user's programs).
+# - the license file names the window's and the engine's components;
+# - the installer asks for no administrator rights.
+# With -Install it also installs silently into a folder with spaces and non-ASCII letters (as in
+# a user profile named "Şükrü Yılmaz"), checks the installed files, starts the installed program,
+# and uninstalls again (CI only: it changes the current user's programs).
 # Usage: scripts/check-release.ps1 -Arch x64|arm64 -Dir <folder> [-Install]
 param(
     [Parameter(Mandatory = $true)][ValidateSet('x64', 'arm64')][string]$Arch,
@@ -40,6 +42,9 @@ foreach ($line in Get-Content "$Dir\$name.sha256") {
     Check ((Get-FileHash "$Dir\$file" -Algorithm SHA256).Hash -eq $hash) "checksum of $file"
 }
 Release-Exe $setup 'the installer'
+# A per-user installer runs as the user who starts it; Windows shows no UAC prompt for it.
+$text = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($setup))
+Check ($text.Contains('requestedExecutionLevel level="asInvoker"')) 'the installer asks for no administrator rights'
 
 $unzipped = Join-Path ([System.IO.Path]::GetTempPath()) "$name-check"
 Remove-Item -Recurse -Force $unzipped -ErrorAction SilentlyContinue
@@ -57,12 +62,20 @@ foreach ($component in 'react 19', 'ext4-view', 'tauri', 'gptman', 'mbrman') {
 Remove-Item -Recurse -Force $unzipped
 
 if ($Install) {
-    $installed = "$env:LOCALAPPDATA\TuxRead"
-    $process = Start-Process $setup -ArgumentList '/S' -PassThru -Wait
+    $installed = Join-Path ([System.IO.Path]::GetTempPath()) 'Şükrü Yılmaz\TuxRead'
+    # NSIS takes /D= last and unquoted, spaces included.
+    $process = Start-Process $setup -ArgumentList '/S', "/D=$installed" -PassThru -Wait
     Check ($process.ExitCode -eq 0) "the installer runs silently, per user (exit $($process.ExitCode))"
     foreach ($file in 'TuxRead.exe', 'THIRD-PARTY-LICENSES.txt', 'LICENSE-MIT', 'LICENSE-APACHE') {
         Check (Test-Path "$installed\$file") "the installation has $file"
     }
+    $app = Start-Process "$installed\TuxRead.exe" -PassThru
+    for ($i = 0; $i -lt 100 -and -not $app.HasExited -and $app.MainWindowTitle -ne 'TuxRead'; $i++) {
+        Start-Sleep -Milliseconds 200
+        $app.Refresh()
+    }
+    Check ($app.MainWindowTitle -eq 'TuxRead') 'the installed TuxRead opens its window'
+    if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force; $app.WaitForExit() }
     $process = Start-Process "$installed\uninstall.exe" -ArgumentList '/S' -PassThru -Wait
     Check ($process.ExitCode -eq 0) "the uninstaller runs silently (exit $($process.ExitCode))"
     # The uninstaller copies itself away and finishes in the background.
