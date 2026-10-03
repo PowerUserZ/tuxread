@@ -12,3 +12,6 @@ tuxread-core.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 tuxread-win.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres.workspace = true

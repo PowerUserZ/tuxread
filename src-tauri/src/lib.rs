@@ -207,3 +207,21 @@ pub fn run() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// One version everywhere (spec §9): Cargo.toml gives it to both executables' version
+    /// resources, the installer and the diagnostics; package.json gives it to About.
+    #[test]
+    fn the_version_comes_from_cargo_toml_alone() {
+        let package: serde_json::Value =
+            serde_json::from_str(include_str!("../../package.json")).unwrap();
+        assert_eq!(package["version"], env!("CARGO_PKG_VERSION"));
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert!(
+            config.get("version").is_none(),
+            "tauri.conf.json must not set its own version; Tauri then uses Cargo.toml's"
+        );
+    }
+}
