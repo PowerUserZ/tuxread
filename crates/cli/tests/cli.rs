@@ -1,9 +1,9 @@
-//! tuxread-cli as a user runs it.
+//! tuxread-cli as a user runs it. The checks need Windows disks, so the file is Windows-only.
+#![cfg(windows)]
 
 use std::process::Command;
 
 /// A disk number that does not exist is reported at once, before any UAC prompt for the helper.
-#[cfg(windows)]
 #[test]
 fn a_disk_that_does_not_exist_is_named_without_asking_for_admin() {
     let out = Command::new(env!("CARGO_BIN_EXE_tuxread-cli"))

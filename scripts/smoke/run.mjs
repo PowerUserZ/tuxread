@@ -4,7 +4,7 @@
 // Each scenario gets a fresh app with a throwaway WebView2 profile, so it starts in a known state
 // and leaves the user's own TuxRead settings alone.
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -23,20 +23,28 @@ if (!existsSync(exe)) {
   process.exit(2);
 }
 
-const port = 9333;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const devtools = () =>
-  fetch(`http://127.0.0.1:${port}/json`)
+// WebView2 picks a free port (a fixed one can sit in a range Windows reserves) and writes it to
+// DevToolsActivePort in the profile.
+const devtools = (profile) => {
+  let port;
+  try {
+    port = readFileSync(join(profile, "EBWebView", "DevToolsActivePort"), "utf8").split("\n")[0];
+  } catch {
+    return undefined;
+  }
+  return fetch(`http://127.0.0.1:${port}/json`)
     .then((r) => r.json())
     .then((list) => list.find((t) => t.type === "page"))
     .catch(() => undefined);
+};
 
 async function launch() {
   const profile = mkdtempSync(join(tmpdir(), "tuxread-smoke-"));
   const app = spawn(exe, [], {
     env: {
       ...process.env,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=0",
       WEBVIEW2_USER_DATA_FOLDER: profile,
     },
     stdio: "ignore",
@@ -44,7 +52,7 @@ async function launch() {
   let target;
   for (let i = 0; i < 150 && !target; i++) {
     await sleep(200);
-    target = await devtools();
+    target = await devtools(profile);
   }
   if (!target) {
     app.kill();
@@ -96,7 +104,7 @@ async function launch() {
     },
     /** Presses `key` (a DOM key name) in the focused element. Modifiers: 1 Alt, 2 Ctrl, 8 Shift. */
     async key(key, modifiers = 0) {
-      const codes = { Backspace: 8, Enter: 13, Escape: 27, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38, ArrowDown: 40, F5: 116 };
+      const codes = { Backspace: 8, Tab: 9, Enter: 13, Escape: 27, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38, ArrowDown: 40, F5: 116 };
       const windowsVirtualKeyCode = codes[key] ?? key.toUpperCase().charCodeAt(0);
       // Enter also sends its character, as a real key press does: forms submit on it.
       const down = key === "Enter" ? { type: "keyDown", text: "\r" } : { type: "rawKeyDown" };

@@ -36,6 +36,9 @@ export default async function (page) {
   await page.key("Enter");
   await page.waitFor(`${rows}.length === 4`);
   assert.deepEqual(await page.eval(names), ["dir", "lost+found", "a.txt", "link"], "folders first, then by name");
+  // The chosen volume is now the tree's one Tab stop, so Tab comes back to it.
+  assert.equal(await page.eval(`${q(".item.volume")}.tabIndex`), 0, "the chosen volume is the Tab stop");
+  assert.equal(await page.eval(`${q(".source-head")}.tabIndex`), -1);
   assert.equal(await page.eval(path), "ext4");
   assert.match(await page.eval(`${q(".statusbar")}.textContent`), /^4 items.*ext4, .* used of 512 KB$/);
 
@@ -50,6 +53,15 @@ export default async function (page) {
   await page.waitFor(`${path} === "ext4 / dir"`);
   await page.eval(`${q(".pathbar button")}.click()`);
   await page.waitFor(`${path} === "ext4" && ${rows}.length === 4`);
+
+  // The column headers sort from the keyboard: Tab from the list reaches "Name".
+  await page.eval(`${q(".filelist")}.focus()`);
+  await page.key("Tab");
+  assert.equal(await page.eval("document.activeElement.textContent"), "Name ▴");
+  await page.key("Enter");
+  await page.waitFor(`${names}.join() === "lost+found,dir,link,a.txt"`);
+  await page.key("Enter");
+  await page.waitFor(`${names}.join() === "dir,lost+found,a.txt,link"`);
 
   // Arrow keys move the focus; Enter on a folder enters it.
   await page.eval(`${q(".filelist")}.focus()`);

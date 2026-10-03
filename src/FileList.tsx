@@ -77,7 +77,8 @@ export function FileList(props: Props) {
       aria-rowcount={entries.length + 1}
       aria-activedescendant={selection.focus === null ? undefined : `row-${selection.focus}`}
       tabIndex={0}
-      onKeyDown={(e) => props.onKeyDown(e, pageRows)}
+      // Keys pressed on a header button are the button's (Enter sorts), not the list's.
+      onKeyDown={(e) => e.target === e.currentTarget && props.onKeyDown(e, pageRows)}
     >
       <div className="body" ref={body} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
       <div className="row head" role="row" aria-rowindex={1}>
@@ -88,7 +89,8 @@ export function FileList(props: Props) {
             className={c.className}
             aria-sort={sort.key === c.key ? (sort.descending ? "descending" : "ascending") : "none"}
           >
-            <button type="button" tabIndex={-1} onClick={() => props.onSort(c.key)}>
+            {/* Tab from the list reaches the headers, so sorting works from the keyboard. */}
+            <button type="button" onClick={() => props.onSort(c.key)}>
               {t(c.label)}
               {sort.key === c.key && <span aria-hidden="true">{sort.descending ? " ▾" : " ▴"}</span>}
             </button>

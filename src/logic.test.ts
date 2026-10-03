@@ -3,6 +3,7 @@ import { type EntryView, asCommandError } from "./api";
 import { formatMode, formatOctal, formatSize, formatTime } from "./format";
 import { pickLang, translate } from "./i18n";
 import { click, emptySelection, move, selectAll, sortEntries } from "./listing";
+import { folderPath } from "./paths";
 
 const entry = (id: number, name: string, kind: EntryView["kind"], size = 0, mtime: number | null = 0): EntryView => ({
   id,
@@ -134,5 +135,15 @@ describe("errors", () => {
     expect(asCommandError(clipboard)).toEqual({ code: "other", message: "Document is not focused." });
     expect(asCommandError({ code: "noSuchCode", message: "m" })).toEqual({ code: "other", message: "m" });
     expect(asCommandError("plugin said no")).toEqual({ code: "other", message: "plugin said no" });
+  });
+});
+
+describe("paths", () => {
+  it("a pasted folder path loses Explorer's quotes and outer spaces", () => {
+    expect(folderPath('  "C:\\Users\\me\\Copies"  ')).toBe("C:\\Users\\me\\Copies");
+    expect(folderPath("D:\\Out ")).toBe("D:\\Out");
+    expect(folderPath('"')).toBe('"');
+    expect(folderPath('C:\\a "b"')).toBe('C:\\a "b"');
+    expect(folderPath("   ")).toBe("");
   });
 });

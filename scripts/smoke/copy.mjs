@@ -54,7 +54,8 @@ export default async function (page) {
     assert.equal(await copyAll(page, dest), "1 copied, 3 renamed, 1 skipped, 0 failed");
     assert.ok(existsSync(join(dest, "a (2).txt")));
     assert.ok(existsSync(join(dest, "dir (2)", "b.txt")));
-    assert.equal(await copyAll(page, dest, "skip"), "0 copied, 0 renamed, 4 skipped, 0 failed");
+    // Pasted with the quotes Explorer's "Copy as path" adds.
+    assert.equal(await copyAll(page, `"${dest}"`, "skip"), "0 copied, 0 renamed, 4 skipped, 0 failed");
 
     // Into a folder that does not exist: the copy does not start.
     assert.match(await copyAll(page, join(dest, "missing")), /^The copy couldn't start\. That is not a folder\./);
