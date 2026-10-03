@@ -36,9 +36,16 @@ impl Volume {
 
 #[derive(Clone)]
 pub enum NodeKind {
-    Partition { number: u32 },
+    /// `type_name` is the partition type ("Linux filesystem", "Basic data", "type 0x8E").
+    Partition {
+        number: u32,
+        type_name: String,
+    },
     Volume(Volume),
-    Detected { name: String, status: Status },
+    Detected {
+        name: String,
+        status: Status,
+    },
 }
 
 #[derive(Clone)]
@@ -109,7 +116,10 @@ fn partition_nodes(dev: &Arc<dyn BlockDev>, table: &Table) -> Vec<Node> {
             Node {
                 label: partition_label(p),
                 size: p.len,
-                kind: NodeKind::Partition { number: p.number },
+                kind: NodeKind::Partition {
+                    number: p.number,
+                    type_name: p.type_name.clone(),
+                },
                 children: vec![child],
             }
         })
@@ -265,6 +275,10 @@ mod tests {
         let nodes = probe(Arc::new(MemDev(disk)));
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].label, "Partition 1 (Linux)");
+        assert!(matches!(
+            &nodes[0].kind,
+            NodeKind::Partition { number: 1, type_name } if type_name == "Linux"
+        ));
         let leaves = leaves(&nodes);
         assert!(matches!(
             &leaves[0].kind,

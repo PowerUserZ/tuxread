@@ -28,4 +28,8 @@ export default async function (page) {
   );
   assert.equal(await page.eval("window.isSecureContext"), true, "the clipboard needs a secure context");
 
+  // The app's own commands answer.
+  const sources = await page.eval(`window.__TAURI_INTERNALS__.invoke("list_sources")`);
+  assert.ok(Array.isArray(sources.disks) && Array.isArray(sources.images));
+  assert.match(await page.eval(`window.__TAURI_INTERNALS__.invoke("diagnostics")`), /^TuxRead \d/);
 }
