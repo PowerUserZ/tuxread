@@ -12,6 +12,7 @@
 
 pub mod display;
 pub mod error;
+pub mod worker;
 
 pub fn run() {
     let logs = tauri_plugin_log::Builder::new()
