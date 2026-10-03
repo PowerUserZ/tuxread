@@ -8,7 +8,8 @@ use std::sync::atomic::AtomicBool;
 use tuxread_core::cache::CachedDev;
 use tuxread_core::copy::{Conflict, Outcome, copy_out};
 use tuxread_core::dev::{BlockDev, FileDev};
-use tuxread_core::fs::{Kind, join};
+use tuxread_core::display::display_name;
+use tuxread_core::fs::{Entry, Kind, join};
 use tuxread_core::probe::{self, Node, NodeKind, Status, Volume};
 
 const USAGE: &str = "usage:
@@ -80,8 +81,12 @@ fn open_source(src: &str) -> Result<Vec<Node>, String> {
 /// helper, through one UAC prompt, and reads through it.
 #[cfg(windows)]
 fn open_disk(n: u32) -> Result<Arc<dyn BlockDev>, String> {
-    use tuxread_win::disk::WinDisk;
+    use tuxread_win::disk::{WinDisk, list_disks};
     use tuxread_win::helper;
+    // Listing disks needs no admin rights, so a wrong number never costs a UAC prompt.
+    if !list_disks().iter().any(|d| d.number == n) {
+        return Err(format!("no disk {n} (`tuxread-cli disks` lists them)"));
+    }
     if tuxread_win::is_elevated() {
         return Ok(Arc::new(WinDisk::open(n).map_err(|e| e.to_string())?));
     }
@@ -101,7 +106,7 @@ fn disks_cmd() -> Result<(), String> {
         println!(
             "disk:{}  {}  [{}]  {}, {}-byte sectors",
             d.number,
-            d.model,
+            display_name(d.model.as_bytes()),
             human_size(d.size),
             d.bus,
             d.logical_sector
@@ -146,18 +151,18 @@ fn print_nodes(nodes: &[Node], depth: usize, counter: &mut usize) {
     for node in nodes {
         let indent = "  ".repeat(depth);
         let size = human_size(node.size);
+        let label = display_name(node.label.as_bytes());
         match &node.kind {
-            NodeKind::Partition { .. } => println!("{indent}{} [{size}]", node.label),
+            NodeKind::Partition { .. } => println!("{indent}{label} [{size}]"),
             NodeKind::Volume(_) => {
                 *counter += 1;
-                println!("{indent}#{counter} {} [{size}]", node.label);
+                println!("{indent}#{counter} {label} [{size}]");
             }
             NodeKind::Detected { status, .. } => {
                 *counter += 1;
                 println!(
-                    "{indent}#{counter} {} [{size}] - {}",
-                    node.label,
-                    status_text(status)
+                    "{indent}#{counter} {label} [{size}] - {}",
+                    display_name(status_text(status).as_bytes())
                 );
             }
         }
@@ -184,25 +189,32 @@ fn ls_cmd(src: &str, vol: &str, path: &str) -> Result<(), String> {
         .map_err(|e| format!("{path}: {e}"))?;
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     for e in entries {
-        let kind = match e.kind {
-            Kind::Dir => 'd',
-            Kind::File => '-',
-            Kind::Symlink => 'l',
-            Kind::Other => '?',
-        };
-        let time = e.mtime.map(|t| format_time(t.secs)).unwrap_or_default();
-        let mut name = String::from_utf8_lossy(&e.name).into_owned();
-        if e.kind == Kind::Symlink
-            && let Ok(target) = fs.read_link(&join(path.as_bytes(), &e.name))
-        {
-            name = format!("{name} -> {}", String::from_utf8_lossy(&target));
-        }
-        println!(
-            "{kind} {:04o} {:>5}:{:<5} {time} {:>12} {name}",
-            e.mode, e.uid, e.gid, e.size
-        );
+        let target = (e.kind == Kind::Symlink)
+            .then(|| fs.read_link(&join(path.as_bytes(), &e.name)).ok())
+            .flatten();
+        println!("{}", ls_line(&e, target.as_deref()));
     }
     Ok(())
+}
+
+/// One line of `ls`, like `ls -l`. Names from the image go through `display_name`, so they
+/// cannot send escape sequences to the console.
+fn ls_line(e: &Entry, link: Option<&[u8]>) -> String {
+    let kind = match e.kind {
+        Kind::Dir => 'd',
+        Kind::File => '-',
+        Kind::Symlink => 'l',
+        Kind::Other => '?',
+    };
+    let time = e.mtime.map(|t| format_time(t.secs)).unwrap_or_default();
+    let mut name = display_name(&e.name);
+    if let Some(target) = link {
+        name = format!("{name} -> {}", display_name(target));
+    }
+    format!(
+        "{kind} {:04o} {:>5}:{:<5} {time} {:>12} {name}",
+        e.mode, e.uid, e.gid, e.size
+    )
 }
 
 fn cp_cmd(src: &str, vol: &str, path: &str, dest: &str) -> Result<(), String> {
@@ -223,15 +235,25 @@ fn cp_cmd(src: &str, vol: &str, path: &str, dest: &str) -> Result<(), String> {
             Outcome::Copied => copied += 1,
             Outcome::Renamed { to } => {
                 renamed += 1;
-                println!("renamed  {} -> {to}", item.source);
+                println!("renamed  {} -> {to}", display_name(item.source.as_bytes()));
             }
             Outcome::Skipped { reason } => {
                 skipped += 1;
-                println!("skipped  {} ({reason})", item.source);
+                let (source, reason) = (item.source.as_bytes(), reason.as_bytes());
+                println!(
+                    "skipped  {} ({})",
+                    display_name(source),
+                    display_name(reason)
+                );
             }
             Outcome::Failed { reason } => {
                 failed += 1;
-                println!("FAILED   {} ({reason})", item.source);
+                let (source, reason) = (item.source.as_bytes(), reason.as_bytes());
+                println!(
+                    "FAILED   {} ({})",
+                    display_name(source),
+                    display_name(reason)
+                );
             }
         }
     }
@@ -315,5 +337,26 @@ mod tests {
     fn human_sizes() {
         assert_eq!(human_size(512), "512 B");
         assert_eq!(human_size(64 * 1024 * 1024), "64.0 MiB");
+    }
+
+    #[test]
+    fn names_from_an_image_cannot_drive_the_terminal() {
+        // An escape sequence in a name could retitle or clear the console, or worse.
+        let entry = tuxread_core::fs::Entry {
+            name: b"evil\x1b]0;owned\x07.txt".to_vec(),
+            kind: Kind::Symlink,
+            size: 9,
+            mtime: None,
+            mode: 0o777,
+            uid: 0,
+            gid: 0,
+            ino: 12,
+        };
+        let line = ls_line(&entry, Some(b"\x1b[2J"));
+        assert!(!line.contains('\x1b'), "{line:?}");
+        assert!(
+            line.ends_with("evil⟨U+001B⟩]0;owned⟨U+0007⟩.txt -> ⟨U+001B⟩[2J"),
+            "{line}"
+        );
     }
 }
