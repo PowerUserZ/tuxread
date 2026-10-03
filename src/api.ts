@@ -2,15 +2,18 @@
 // names here are display text, never paths to send back.
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-export type ErrorCode =
-  | "declined"
-  | "helperGone"
-  | "notFound"
-  | "notADirectory"
-  | "unsupported"
-  | "corrupt"
-  | "io"
-  | "other";
+const errorCodes = [
+  "declined",
+  "helperGone",
+  "notFound",
+  "notADirectory",
+  "unsupported",
+  "corrupt",
+  "io",
+  "other",
+] as const;
+
+export type ErrorCode = (typeof errorCodes)[number];
 
 export type CommandError = { code: ErrorCode; message: string };
 
@@ -94,10 +97,12 @@ export type ReportItem = {
   detail: string | null;
 };
 
-/** Errors from `invoke` are `CommandError`s; anything else becomes one. */
+/** Errors from `invoke` are `CommandError`s. Anything else (a plugin's text, a DOMException
+ *  with a numeric `code`) becomes `other`, so the window only ever translates codes it knows. */
 export function asCommandError(e: unknown): CommandError {
-  if (typeof e === "object" && e !== null && "code" in e && "message" in e) {
-    return e as CommandError;
+  if (typeof e === "object" && e !== null && "message" in e) {
+    const known = "code" in e && errorCodes.includes(e.code as ErrorCode);
+    return { code: known ? (e.code as ErrorCode) : "other", message: String(e.message) };
   }
   return { code: "other", message: String(e) };
 }

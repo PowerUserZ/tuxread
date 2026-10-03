@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EntryView } from "./api";
+import { type EntryView, asCommandError } from "./api";
 import { formatMode, formatOctal, formatSize, formatTime } from "./format";
 import { pickLang, translate } from "./i18n";
 import { click, emptySelection, move, selectAll, sortEntries } from "./listing";
@@ -123,5 +123,16 @@ describe("selection", () => {
 
   it("Ctrl+A selects everything", () => {
     expect(selectAll(order).ids.size).toBe(4);
+  });
+});
+
+describe("errors", () => {
+  it("anything that is not a backend error becomes `other`, keeping its text", () => {
+    expect(asCommandError({ code: "helperGone", message: "gone" })).toEqual({ code: "helperGone", message: "gone" });
+    // A DOMException has a numeric `code` and a `message`, but is not a backend error.
+    const clipboard = new DOMException("Document is not focused.", "NotAllowedError");
+    expect(asCommandError(clipboard)).toEqual({ code: "other", message: "Document is not focused." });
+    expect(asCommandError({ code: "noSuchCode", message: "m" })).toEqual({ code: "other", message: "m" });
+    expect(asCommandError("plugin said no")).toEqual({ code: "other", message: "plugin said no" });
   });
 });
