@@ -139,17 +139,13 @@ export function CopyDialog({
     <Dialog
       title={count === 1 ? t("copyTitleOne") : t("copyTitleMany", { n: count })}
       onClose={onClose}
+      onSubmit={() => dest.trim() !== "" && onCopy(dest.trim(), conflict)}
       actions={
         <>
           <button type="button" onClick={onClose}>
             {t("cancel")}
           </button>
-          <button
-            type="button"
-            className="primary"
-            disabled={dest.trim() === ""}
-            onClick={() => onCopy(dest.trim(), conflict)}
-          >
+          <button type="submit" className="primary" disabled={dest.trim() === ""}>
             {t("copy")}
           </button>
         </>

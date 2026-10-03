@@ -7,12 +7,15 @@ export function Dialog({
   children,
   actions,
   wide = false,
+  onSubmit,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   actions: ReactNode;
   wide?: boolean;
+  /** Makes the dialog a form: Enter in a field submits it, through a `type="submit"` button. */
+  onSubmit?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -28,8 +31,22 @@ export function Dialog({
       onClose={onClose}
     >
       <h2 id={titleId}>{title}</h2>
-      <div className="dialog-body">{children}</div>
-      <div className="dialog-actions">{actions}</div>
+      {onSubmit ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit();
+          }}
+        >
+          <div className="dialog-body">{children}</div>
+          <div className="dialog-actions">{actions}</div>
+        </form>
+      ) : (
+        <>
+          <div className="dialog-body">{children}</div>
+          <div className="dialog-actions">{actions}</div>
+        </>
+      )}
     </dialog>
   );
 }

@@ -12,7 +12,8 @@ const rows = `[...document.querySelectorAll(".body .row:not(.head)")]`;
 const row = (name) => `${rows}.find((r) => r.querySelector(".name").textContent === ${JSON.stringify(name)})`;
 const lastJob = `[...document.querySelectorAll(".job")].at(-1)`;
 
-/** Selects everything, copies it to `dest` with the `conflict` choice, and returns the job's summary. */
+/** Selects everything, copies it to `dest` with the `conflict` choice (pressing Enter), and returns
+ *  the job's summary. */
 async function copyAll(page, dest, conflict = null) {
   await page.eval(`${q(".filelist")}.focus()`);
   await page.key("a", 2);
@@ -21,7 +22,9 @@ async function copyAll(page, dest, conflict = null) {
   await page.eval(`${q("dialog[open] input[name=dest]")}.focus()`);
   await page.type(dest);
   if (conflict) await page.eval(`${q(`dialog[open] input[value=${conflict}]`)}.click()`);
-  await page.eval(`${q("dialog[open] .dialog-actions .primary")}.click()`);
+  // Enter in the folder field copies, as in any Windows dialog.
+  await page.eval(`${q("dialog[open] input[name=dest]")}.focus()`);
+  await page.key("Enter");
   await page.waitFor(`${lastJob} !== undefined && ${lastJob}.querySelector(".bar") === null`, 60000);
   return page.eval(`${lastJob}.querySelector(".job-line").textContent`);
 }

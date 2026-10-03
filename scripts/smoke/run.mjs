@@ -98,8 +98,10 @@ async function launch() {
     async key(key, modifiers = 0) {
       const codes = { Backspace: 8, Enter: 13, Escape: 27, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38, ArrowDown: 40, F5: 116 };
       const windowsVirtualKeyCode = codes[key] ?? key.toUpperCase().charCodeAt(0);
-      for (const type of ["rawKeyDown", "keyUp"]) {
-        await send("Input.dispatchKeyEvent", { type, key, modifiers, windowsVirtualKeyCode });
+      // Enter also sends its character, as a real key press does: forms submit on it.
+      const down = key === "Enter" ? { type: "keyDown", text: "\r" } : { type: "rawKeyDown" };
+      for (const event of [down, { type: "keyUp" }]) {
+        await send("Input.dispatchKeyEvent", { ...event, key, modifiers, windowsVirtualKeyCode });
       }
       await sleep(50);
     },
