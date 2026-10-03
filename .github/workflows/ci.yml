@@ -104,6 +104,7 @@ jobs:
           # The CLI copies the same files from the disk as from the image.
           cargo build --locked --release -p tuxread-cli
           $cli = "target\release\tuxread-cli.exe"
+          New-Item -ItemType Directory "$env:RUNNER_TEMP\from-image", "$env:RUNNER_TEMP\from-disk" | Out-Null
           & $cli cp corpus\mbr-logical.img 1 / "$env:RUNNER_TEMP\from-image"
           & $cli cp "disk:$disk" 1 / "$env:RUNNER_TEMP\from-disk"
           $a = Get-ChildItem -Recurse -File "$env:RUNNER_TEMP\from-image" | ForEach-Object { "{0} {1}" -f $_.FullName.Substring("$env:RUNNER_TEMP\from-image".Length), (Get-FileHash $_.FullName).Hash }
