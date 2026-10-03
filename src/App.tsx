@@ -80,8 +80,25 @@ export function App() {
   const request = useRef(0);
   const nextJob = useRef(0);
 
-  const fail = useCallback((e: unknown) => setError(asCommandError(e)), []);
-  const refreshSources = useCallback(() => listSources().then(setSources, fail), [fail]);
+  const refreshSources = useCallback(
+    () => listSources().then(setSources, (e: unknown) => setError(asCommandError(e))),
+    [],
+  );
+  /** Shows an error. When the disk helper is gone, so are its volumes, and the view resets. */
+  const fail = useCallback(
+    (e: unknown) => {
+      const err = asCommandError(e);
+      setError(err);
+      if (err.code !== "helperGone") return;
+      setVolume(null);
+      setPlace(null);
+      setHistory([]);
+      setCrumbs([]);
+      setEntries([]);
+      void refreshSources();
+    },
+    [refreshSources],
+  );
   useEffect(() => {
     void refreshSources();
   }, [refreshSources]);
@@ -179,7 +196,11 @@ export function App() {
     ]);
     copy(place.volume, [...selection.ids], dest, conflict, (e) => {
       if (e.event === "progress") update((j) => ({ ...j, progress: e.data }));
-      else update((j) => ({ ...j, finished: e.data }));
+      else {
+        update((j) => ({ ...j, finished: e.data }));
+        // A disk whose helper went away during the copy shows as locked again.
+        void refreshSources();
+      }
     }).then(
       (id) => update((j) => ({ ...j, id })),
       (e) => {
