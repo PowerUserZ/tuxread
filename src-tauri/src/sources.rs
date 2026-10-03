@@ -51,6 +51,8 @@ pub struct NodeView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FixView {
+    /// `Get-Disk`'s Number: the disk TuxRead read, so the commands touch no other.
+    pub number: u32,
     /// "gpt" or "mbr".
     pub table: &'static str,
     /// `Get-Disk`'s Guid ("{…}") for GPT, or its Signature (decimal) for MBR.
@@ -247,8 +249,12 @@ impl Registry {
     ) -> Opened {
         let size = dev.len();
         let nodes = probe::probe(Arc::new(CachedDev::new(dev)));
+        let number = disk.as_ref().map(|d| d.number);
         let helper_disk = via_helper.then_some(key);
-        let views = nodes.iter().map(|n| self.view(n, helper_disk)).collect();
+        let views = nodes
+            .iter()
+            .map(|n| self.view(n, number, helper_disk))
+            .collect();
         Opened {
             key,
             disk,
@@ -260,11 +266,12 @@ impl Registry {
         }
     }
 
-    fn view(&mut self, node: &Node, helper_disk: Option<u32>) -> NodeView {
+    /// `number` is the disk's number, None for an image (whose partitions Windows never sees).
+    fn view(&mut self, node: &Node, number: Option<u32>, helper_disk: Option<u32>) -> NodeView {
         let children = node
             .children
             .iter()
-            .map(|c| self.view(c, helper_disk))
+            .map(|c| self.view(c, number, helper_disk))
             .collect();
         let mut view = NodeView {
             label: display_name(node.label.as_bytes()),
@@ -299,7 +306,7 @@ impl Registry {
                 let (name, detail) = match status {
                     Status::WindowsCanOpen => ("windows", None),
                     Status::WindowsSkips(fix) => {
-                        view.fix = Some(fix_view(fix));
+                        view.fix = number.map(|n| fix_view(fix, n));
                         ("windowsSkips", Some(display_name(fix.type_name.as_bytes())))
                     }
                     Status::Later => ("later", None),
@@ -315,7 +322,7 @@ impl Registry {
     }
 }
 
-fn fix_view(fix: &TypeFix) -> FixView {
+fn fix_view(fix: &TypeFix, number: u32) -> FixView {
     let guid = |g: &[u8; 16]| format!("{{{}}}", part::guid_string(g).to_lowercase());
     let code = |c: &TypeCode| match c {
         TypeCode::Gpt(g) => guid(g),
@@ -326,6 +333,7 @@ fn fix_view(fix: &TypeFix) -> FixView {
         DiskId::Mbr(signature) => ("mbr", signature.to_string()),
     };
     FixView {
+        number,
         table,
         disk,
         offset: fix.offset,
@@ -472,8 +480,9 @@ mod tests {
             type_name: "Linux filesystem".into(),
         };
         assert_eq!(
-            fix_view(&gpt),
+            fix_view(&gpt, 2),
             FixView {
+                number: 2,
                 table: "gpt",
                 disk: "{5eae9c6e-b1a2-4be1-b33c-d406eab75dc1}".into(),
                 offset: 1 << 20,
@@ -488,15 +497,16 @@ mod tests {
             to: TypeCode::Mbr(0x07),
             type_name: "Linux".into(),
         };
-        let view = fix_view(&mbr);
+        let view = fix_view(&mbr, 3);
         assert_eq!(
             (
+                view.number,
                 view.table,
                 view.disk.as_str(),
                 view.from.as_str(),
                 view.to.as_str()
             ),
-            ("mbr", "305419896", "131", "7")
+            (3, "mbr", "305419896", "131", "7")
         );
     }
 }

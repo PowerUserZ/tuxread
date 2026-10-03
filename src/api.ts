@@ -21,7 +21,7 @@ export type FsView = { fsType: string; label: string; uuid: string; size: number
 
 /** A partition Windows skips, in PowerShell's terms: Get-Disk's Guid or Signature, and
  *  Get-Partition's Offset and GptType or MbrType now and after the fix. */
-export type FixView = { table: "gpt" | "mbr"; disk: string; offset: number; from: string; to: string };
+export type FixView = { number: number; table: "gpt" | "mbr"; disk: string; offset: number; from: string; to: string };
 
 export type NodeView = {
   label: string;

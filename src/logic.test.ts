@@ -150,8 +150,9 @@ describe("paths", () => {
 });
 
 describe("windows fix", () => {
-  it("finds a GPT partition by the disk's GUID, its offset and its type before changing it", () => {
+  it("finds a GPT partition by the disk's number and GUID, its offset and its type before changing it", () => {
     const fix = {
+      number: 2,
       table: "gpt" as const,
       disk: "{5eae9c6e-b1a2-4be1-b33c-d406eab75dc1}",
       offset: 1048576,
@@ -160,9 +161,9 @@ describe("windows fix", () => {
     };
     expect(fixScript(fix, "Not found: nothing was changed.")).toBe(
       [
-        "$p = Get-Disk | Where-Object Guid -eq '{5eae9c6e-b1a2-4be1-b33c-d406eab75dc1}' | Get-Partition | Where-Object { $_.Offset -eq 1048576 -and $_.GptType -eq '{0fc63daf-8483-4772-8e79-3d69d8477de4}' }",
+        "$p = Get-Disk -Number 2 | Where-Object Guid -eq '{5eae9c6e-b1a2-4be1-b33c-d406eab75dc1}' | Get-Partition | Where-Object { $_.Offset -eq 1048576 -and $_.GptType -eq '{0fc63daf-8483-4772-8e79-3d69d8477de4}' }",
         "if ($p) {",
-        "    $p | Set-Partition -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'",
+        "    $p | Set-Partition -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' -ErrorAction Stop",
         "    $p = $p | Get-Partition",
         "    if (-not [char]::IsLetter($p.DriveLetter)) { $p | Add-PartitionAccessPath -AssignDriveLetter }",
         "    $p | Get-Partition | Get-Volume | Format-List DriveLetter, FileSystemType, FileSystemLabel",
@@ -174,11 +175,11 @@ describe("windows fix", () => {
   });
 
   it("uses the MBR signature and type numbers, and quotes the message", () => {
-    const fix = { table: "mbr" as const, disk: "305419896", offset: 65536, from: "131", to: "7" };
+    const fix = { number: 3, table: "mbr" as const, disk: "305419896", offset: 65536, from: "131", to: "7" };
     const script = fixScript(fix, "TuxRead'in bulamadığı bölüm");
-    expect(script).toContain("Where-Object Signature -eq 305419896 |");
+    expect(script).toContain("Get-Disk -Number 3 | Where-Object Signature -eq 305419896 |");
     expect(script).toContain("$_.Offset -eq 65536 -and $_.MbrType -eq 131 }");
-    expect(script).toContain("Set-Partition -MbrType 7\n");
+    expect(script).toContain("Set-Partition -MbrType 7 -ErrorAction Stop\n");
     expect(script).toContain("'TuxRead''in bulamadığı bölüm'");
   });
 });
