@@ -11,13 +11,13 @@ pub fn diagnostics(app: &App) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "TuxRead {} diagnostics (no file names, labels or paths)",
-        env!("CARGO_PKG_VERSION")
+        "TuxRead {} ({} build) diagnostics (no file names, labels or paths)",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::ARCH
     );
     let _ = writeln!(
         out,
-        "Windows {}, elevated: {}, disk helper running: {}",
-        std::env::consts::ARCH,
+        "elevated: {}, disk helper running: {}",
         tuxread_win::is_elevated(),
         app.helper_running()
     );
@@ -101,5 +101,22 @@ mod tests {
         assert!(text.contains("disk:0 "), "{text}");
         assert!(!text.contains("tiny-ext4"), "{text}");
         assert!(!text.contains(r"\"), "{text}");
+    }
+
+    /// The architecture is the build's (an x64 build also runs on ARM64 Windows), so it is
+    /// named next to the version, not as if it were the Windows edition.
+    #[test]
+    fn the_architecture_is_named_as_the_build_s() {
+        let text = diagnostics(&App::default());
+        let first = format!(
+            "TuxRead {} ({} build) diagnostics",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::ARCH
+        );
+        assert!(text.starts_with(&first), "{text}");
+        assert!(
+            text.lines().nth(1).unwrap().starts_with("elevated: "),
+            "{text}"
+        );
     }
 }

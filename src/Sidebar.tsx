@@ -19,6 +19,11 @@ type Props = {
   onDiagnostics: () => void;
 };
 
+/** True when volume `id` is somewhere under `nodes`. */
+function hasVolume(nodes: NodeView[], id: number): boolean {
+  return nodes.some((n) => n.volume === id || hasVolume(n.children, id));
+}
+
 /** What a top-level node holds, for its color on the bar. */
 function tone(node: NodeView): string {
   const leaf = node.kind === "partition" ? node.children[0] : node;
@@ -69,6 +74,9 @@ function onTreeKey(e: KeyboardEvent<HTMLElement>) {
 export function Sidebar(props: Props) {
   const { t, lang } = useI18n();
   const { sources, current, opening } = props;
+  // The tree is one Tab stop, so Tab returns to where the user was: the chosen volume, or else
+  // the first item. Arrow keys move within the tree.
+  const atCurrent = current !== null && [...sources.disks, ...sources.images].some((s) => hasVolume(s.nodes, current));
 
   const nodeItems = (nodes: NodeView[], level: number) =>
     nodes.map((node, i) => (
@@ -78,7 +86,7 @@ export function Sidebar(props: Props) {
             role="treeitem"
             aria-level={level}
             aria-selected={current === node.volume}
-            tabIndex={-1}
+            tabIndex={atCurrent && current === node.volume ? 0 : -1}
             className={current === node.volume ? "item volume current" : "item volume"}
             onClick={() => props.onChooseVolume({ volume: node.volume as number, node })}
           >
@@ -101,7 +109,6 @@ export function Sidebar(props: Props) {
       </li>
     ));
 
-  // The tree is one Tab stop: its first item; arrow keys move within it.
   const first = sources.disks[0] ?? sources.images[0];
 
   const sourceItem = (source: SourceView) => {
@@ -112,7 +119,7 @@ export function Sidebar(props: Props) {
         <div
           role="treeitem"
           aria-level={1}
-          tabIndex={source === first ? 0 : -1}
+          tabIndex={!atCurrent && source === first ? 0 : -1}
           aria-busy={busy}
           title={locked ? t("diskLocked") : source.detail}
           className={locked ? "item source-head locked" : "item source-head"}

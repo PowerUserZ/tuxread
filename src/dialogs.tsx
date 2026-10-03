@@ -14,6 +14,7 @@ import {
 import { Dialog } from "./Dialog";
 import { formatMode, formatOctal, formatSize, formatTime } from "./format";
 import { type Key, type Lang, useI18n } from "./i18n";
+import { folderPath } from "./paths";
 
 const errorKey: Record<ErrorCode, Key> = {
   declined: "errDeclined",
@@ -139,13 +140,13 @@ export function CopyDialog({
     <Dialog
       title={count === 1 ? t("copyTitleOne") : t("copyTitleMany", { n: count })}
       onClose={onClose}
-      onSubmit={() => dest.trim() !== "" && onCopy(dest.trim(), conflict)}
+      onSubmit={() => folderPath(dest) !== "" && onCopy(folderPath(dest), conflict)}
       actions={
         <>
           <button type="button" onClick={onClose}>
             {t("cancel")}
           </button>
-          <button type="submit" className="primary" disabled={dest.trim() === ""}>
+          <button type="submit" className="primary" disabled={folderPath(dest) === ""}>
             {t("copy")}
           </button>
         </>

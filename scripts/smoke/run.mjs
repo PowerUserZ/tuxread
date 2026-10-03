@@ -96,7 +96,7 @@ async function launch() {
     },
     /** Presses `key` (a DOM key name) in the focused element. Modifiers: 1 Alt, 2 Ctrl, 8 Shift. */
     async key(key, modifiers = 0) {
-      const codes = { Backspace: 8, Enter: 13, Escape: 27, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38, ArrowDown: 40, F5: 116 };
+      const codes = { Backspace: 8, Tab: 9, Enter: 13, Escape: 27, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38, ArrowDown: 40, F5: 116 };
       const windowsVirtualKeyCode = codes[key] ?? key.toUpperCase().charCodeAt(0);
       // Enter also sends its character, as a real key press does: forms submit on it.
       const down = key === "Enter" ? { type: "keyDown", text: "\r" } : { type: "rawKeyDown" };
