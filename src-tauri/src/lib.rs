@@ -10,6 +10,9 @@
     )
 )]
 
+pub mod display;
+pub mod error;
+
 pub fn run() {
     let logs = tauri_plugin_log::Builder::new()
         .target(tauri_plugin_log::Target::new(
