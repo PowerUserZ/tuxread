@@ -180,12 +180,10 @@ pub fn run() {
         tuxread_win::show_error("TuxRead", NO_WEBVIEW2);
         std::process::exit(1);
     }
+    // The default targets: stdout and TuxRead.log in the app's log folder. Adding a LogDir
+    // target of our own would write every line twice, to the same file (names are not
+    // case-sensitive on Windows).
     let logs = tauri_plugin_log::Builder::new()
-        .target(tauri_plugin_log::Target::new(
-            tauri_plugin_log::TargetKind::LogDir {
-                file_name: Some("tuxread".into()),
-            },
-        ))
         .max_file_size(1 << 20)
         .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
         .level(log::LevelFilter::Info)

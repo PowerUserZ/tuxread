@@ -1,6 +1,8 @@
 // Spec §5.8: only TuxRead's own commands run, there is no global Tauri object, and the
 // content security policy blocks network requests and inline scripts.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const invoke = (cmd) =>
   `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}).then(() => "allowed", (e) => "refused: " + e)`;
@@ -32,4 +34,10 @@ export default async function (page) {
   const sources = await page.eval(`window.__TAURI_INTERNALS__.invoke("list_sources")`);
   assert.ok(Array.isArray(sources.disks) && Array.isArray(sources.images));
   assert.match(await page.eval(`window.__TAURI_INTERNALS__.invoke("diagnostics")`), /^TuxRead \d/);
+
+  // The log has each line once: this launch's start appears a single time.
+  const log = join(process.env.LOCALAPPDATA, "io.github.poweruserz.tuxread", "logs", "TuxRead.log");
+  const lines = readFileSync(log, "utf8").split(/\r?\n/);
+  const start = lines.filter((l) => / started$/.test(l)).at(-1);
+  assert.equal(lines.filter((l) => l === start).length, 1, `the log repeats ${start}`);
 }
