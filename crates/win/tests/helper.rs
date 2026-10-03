@@ -253,8 +253,14 @@ mod windows {
 
     fn a_launched_helper_serves_and_exits_with_its_parent() {
         let exe = std::env::current_exe().unwrap();
-        let extra = format!("--serve-image \"{}\"", image().display());
-        let launched = helper::launch(&exe, &extra, false).unwrap();
+        // A path with spaces proves that the launch quotes its arguments.
+        let dir = std::env::temp_dir().join(format!("tuxread launch {}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let spaced = dir.join("tiny ext4.img");
+        std::fs::copy(image(), &spaced).unwrap();
+        let spaced_arg = spaced.display().to_string();
+        let launched = helper::launch(&exe, &["--serve-image", &spaced_arg], false, 0).unwrap();
+        assert!(launched.is_running());
         let disk = launched.open_disk(0).unwrap();
         assert_eq!(read_b_txt(Arc::new(disk)), "beta\n");
 
@@ -293,7 +299,7 @@ mod windows {
             return;
         };
         let exe = std::env::current_exe().unwrap();
-        let launched = helper::launch(&exe, "", true).unwrap();
+        let launched = helper::launch(&exe, &[], true, 0).unwrap();
         let disk = launched.open_disk(number.parse().unwrap()).unwrap();
         let mut file = std::fs::File::open(&image).unwrap();
         let len = file.metadata().unwrap().len();
@@ -409,8 +415,8 @@ mod windows {
 
     fn a_helper_that_dies_fails_reads_without_hanging() {
         let exe = std::env::current_exe().unwrap();
-        let extra = format!("--serve-image \"{}\"", image().display());
-        let launched = helper::launch(&exe, &extra, false).unwrap();
+        let image_arg = image().display().to_string();
+        let launched = helper::launch(&exe, &["--serve-image", &image_arg], false, 0).unwrap();
         let disk = launched.open_disk(0).unwrap();
         disk.read_exact_at(0, &mut [0u8; 512]).unwrap();
         let killed = Command::new("taskkill")
@@ -418,7 +424,15 @@ mod windows {
             .output()
             .unwrap();
         assert!(killed.status.success());
-        let failed = within(10, move || disk.read_exact_at(0, &mut [0u8; 512]).is_err());
-        assert!(failed);
+        let error = within(10, move || disk.read_exact_at(0, &mut [0u8; 512]).err()).unwrap();
+        assert!(helper::is_helper_gone(&error), "{error}");
+        // A new connection to the dead helper says the same, without waiting for a timeout.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while launched.is_running() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let error = within(5, move || launched.open_disk(0).err()).unwrap();
+        assert!(helper::is_helper_gone(&error), "{error}");
     }
 }

@@ -200,8 +200,10 @@ impl HelperDisk {
         alive: &dyn Fn() -> bool,
     ) -> io::Result<Self> {
         let mut pipe = connect_pipe(pipe, helper_pid, alive)?;
-        Request::Open { disk: number }.write_to(&mut pipe)?;
-        match Reply::read_from(&mut pipe)? {
+        Request::Open { disk: number }
+            .write_to(&mut pipe)
+            .map_err(gone_if_broken)?;
+        match Reply::read_from(&mut pipe).map_err(gone_if_broken)? {
             Reply::Opened { size, sector } => Ok(Self {
                 pipe: Mutex::new(pipe),
                 len: size,
@@ -243,12 +245,48 @@ fn connect_pipe(name: &str, helper_pid: u32, alive: &dyn Fn() -> bool) -> io::Re
                 let starting = [ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY]
                     .iter()
                     .any(|&code| e.raw_os_error() == Some(code as i32));
-                if !starting || !alive() || Instant::now() > deadline {
+                if starting && !alive() {
+                    return Err(helper_gone());
+                }
+                if !starting || Instant::now() > deadline {
                     return Err(e);
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
+    }
+}
+
+/// Why a disk read or connection failed when the disk helper is no longer running (it
+/// exited, was ended, or its connection broke), as opposed to the disk itself failing.
+/// Test for it with `is_helper_gone`; reading the disk again needs a new helper.
+#[derive(Debug)]
+pub struct HelperGone;
+
+impl std::fmt::Display for HelperGone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the disk helper is no longer running")
+    }
+}
+
+impl std::error::Error for HelperGone {}
+
+pub fn is_helper_gone(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<HelperGone>())
+}
+
+fn helper_gone() -> io::Error {
+    io::Error::new(io::ErrorKind::BrokenPipe, HelperGone)
+}
+
+/// Pipe errors that mean the helper is gone rather than the disk failing.
+fn gone_if_broken(e: io::Error) -> io::Error {
+    use io::ErrorKind::*;
+    match e.kind() {
+        BrokenPipe | UnexpectedEof | ConnectionReset | ConnectionAborted | NotConnected => {
+            helper_gone()
+        }
+        _ => e,
     }
 }
 
@@ -277,8 +315,10 @@ impl BlockDev for HelperDisk {
             self.len,
             &mut |pos, chunk| {
                 let len = u32::try_from(chunk.len()).map_err(io::Error::other)?;
-                Request::Read { offset: pos, len }.write_to(&mut *pipe)?;
-                match Reply::read_from(&mut *pipe)? {
+                Request::Read { offset: pos, len }
+                    .write_to(&mut *pipe)
+                    .map_err(gone_if_broken)?;
+                match Reply::read_from(&mut *pipe).map_err(gone_if_broken)? {
                     Reply::Data(data) if data.len() == chunk.len() => {
                         chunk.copy_from_slice(&data);
                         Ok(())
@@ -420,18 +460,70 @@ impl std::fmt::Display for LaunchError {
 
 impl std::error::Error for LaunchError {}
 
-/// Starts `exe --disk-helper ...` for this process, through UAC when `elevate`.
-/// `extra` is appended to the helper's command line.
-pub fn launch(exe: &std::path::Path, extra: &str, elevate: bool) -> Result<Helper, LaunchError> {
+/// Starts `exe --disk-helper ...` for this process, through UAC when `elevate`. The `extra`
+/// arguments are appended, each quoted for the Windows command line. `owner` is the window
+/// the UAC prompt belongs to (0 for none), so that the prompt opens in front of it.
+pub fn launch(
+    exe: &std::path::Path,
+    extra: &[&str],
+    elevate: bool,
+    owner: isize,
+) -> Result<Helper, LaunchError> {
     let pipe = new_pipe_name().map_err(LaunchError::Failed)?;
-    let params = format!(
-        "{FLAG} --parent {} --pipe {pipe} {extra}",
-        std::process::id()
-    );
-    match sys::shell_execute(exe, params.trim_end(), elevate) {
+    let parent = std::process::id().to_string();
+    let params = [FLAG, "--parent", &parent, "--pipe", &pipe]
+        .into_iter()
+        .chain(extra.iter().copied())
+        .map(quote_arg)
+        .collect::<Vec<_>>()
+        .join(" ");
+    match sys::shell_execute(&session_path(exe), &params, elevate, owner) {
         Ok(process) => Ok(Helper { pipe, process }),
         Err(e) => Err(launch_error(e)),
     }
+}
+
+/// `exe` by a path every sign-in session can see. Drive letters made with `subst` or by
+/// mapping a network drive belong to the session that made them, and an elevated process
+/// runs in another one; so the helper is started by the real path, `C:\...` or `\\server\...`.
+fn session_path(exe: &std::path::Path) -> std::path::PathBuf {
+    let Some(real) = std::fs::canonicalize(exe)
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_owned))
+    else {
+        return exe.to_path_buf();
+    };
+    match real.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}").into(),
+        None => real.strip_prefix(r"\\?\").unwrap_or(&real).into(),
+    }
+}
+
+/// One argument as the Windows command-line parser (CommandLineToArgvW and the MSVC
+/// runtime) reads it back: quoted when needed, with backslashes doubled only before quotes.
+fn quote_arg(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '\x0b', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::from('"');
+    let mut backslashes = 0;
+    for c in arg.chars() {
+        if c == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        let escapes = if c == '"' {
+            2 * backslashes + 1
+        } else {
+            backslashes
+        };
+        out.extend(std::iter::repeat_n('\\', escapes));
+        out.push(c);
+        backslashes = 0;
+    }
+    out.extend(std::iter::repeat_n('\\', 2 * backslashes));
+    out.push('"');
+    out
 }
 
 fn launch_error(e: io::Error) -> LaunchError {
@@ -446,6 +538,11 @@ fn launch_error(e: io::Error) -> LaunchError {
 impl Helper {
     pub fn pid(&self) -> u32 {
         self.process.id()
+    }
+
+    /// False once the helper has exited or was ended; its disks then fail with `HelperGone`.
+    pub fn is_running(&self) -> bool {
+        !self.process.has_exited()
     }
 
     /// Opens disk `number` over a new connection; each `HelperDisk` has its own.
@@ -468,5 +565,51 @@ mod launch_tests {
         assert_eq!(declined.to_string(), "administrator approval was declined");
         let other = launch_error(io::Error::from_raw_os_error(2));
         assert!(matches!(other, LaunchError::Failed(_)));
+    }
+
+    #[test]
+    fn arguments_are_quoted_for_the_windows_command_line() {
+        for (arg, quoted) in [
+            ("abc", "abc"),
+            ("", r#""""#),
+            ("a b", r#""a b""#),
+            (r"C:\Program Files\x\", r#""C:\Program Files\x\\""#),
+            (r#"a"b"#, r#""a\"b""#),
+            (r#"a\"b"#, r#""a\\\"b""#),
+            (r"a\\b", r"a\\b"),
+        ] {
+            assert_eq!(quote_arg(arg), quoted, "{arg}");
+        }
+    }
+
+    #[test]
+    fn the_helper_is_started_by_a_path_every_session_can_see() {
+        // `subst` letters (like mapped network drives) belong to the session that made
+        // them; an elevated process runs in another session and cannot see them.
+        let dir = std::env::temp_dir();
+        let name = format!("tuxread-subst-{}.exe", std::process::id());
+        std::fs::write(dir.join(&name), b"x").unwrap();
+        let free = ('P'..='Z')
+            .rev()
+            .find(|l| !std::path::Path::new(&format!("{l}:\\")).exists());
+        let drive = format!("{}:", free.unwrap());
+        let subst = |args: &[&std::ffi::OsStr]| {
+            std::process::Command::new("subst")
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        };
+        let direct = session_path(&dir.join(&name));
+        assert!(subst(&[drive.as_ref(), dir.as_os_str()]));
+        let resolved = session_path(std::path::Path::new(&format!(r"{drive}\{name}")));
+        subst(&[drive.as_ref(), "/D".as_ref()]);
+        let _ = std::fs::remove_file(dir.join(&name));
+        assert_eq!(resolved, direct);
+        let text = resolved.to_string_lossy().into_owned();
+        assert!(
+            !text.starts_with(&drive) && !text.starts_with(r"\?\"),
+            "{text}"
+        );
     }
 }

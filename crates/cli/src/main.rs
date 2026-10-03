@@ -86,7 +86,7 @@ fn open_disk(n: u32) -> Result<Arc<dyn BlockDev>, String> {
         return Ok(Arc::new(WinDisk::open(n).map_err(|e| e.to_string())?));
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let helper = helper::launch(&exe, "", true).map_err(|e| e.to_string())?;
+    let helper = helper::launch(&exe, &[], true, 0).map_err(|e| e.to_string())?;
     Ok(Arc::new(helper.open_disk(n).map_err(|e| e.to_string())?))
 }
 
