@@ -356,3 +356,21 @@ pub fn is_elevated() -> bool {
     };
     ok != 0 && elevation.TokenIsElevated != 0
 }
+
+/// Shows a modal error message with an OK button, owned by no window, and returns when it
+/// is closed. For failures before any window exists, such as a missing WebView2 runtime.
+pub fn show_error(title: &str, text: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+
+    let title = wide(OsStr::new(title));
+    let text = wide(OsStr::new(text));
+    // SAFETY: both buffers are NUL-terminated UTF-16 strings that outlive the call.
+    unsafe {
+        MessageBoxW(
+            ptr::null_mut(),
+            text.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        )
+    };
+}

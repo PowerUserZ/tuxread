@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use tuxread_core::probe::{Node, NodeKind, Status};
+use tuxread_core::probe::{Node, NodeKind};
 use tuxread_win::disk::list_disks;
 
 use crate::sources::{App, lock};
@@ -11,13 +11,13 @@ pub fn diagnostics(app: &App) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "TuxRead {} diagnostics (no file names, labels or paths)",
-        env!("CARGO_PKG_VERSION")
+        "TuxRead {} ({} build) diagnostics (no file names, labels or paths)",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::ARCH
     );
     let _ = writeln!(
         out,
-        "Windows {}, elevated: {}, disk helper running: {}",
-        std::env::consts::ARCH,
+        "elevated: {}, disk helper running: {}",
         tuxread_win::is_elevated(),
         app.helper_running()
     );
@@ -54,21 +54,11 @@ fn nodes(out: &mut String, nodes: &[Node], depth: usize) {
             }
             NodeKind::Volume(v) => format!("{} volume  {size}", v.info.fs_type),
             NodeKind::Detected { name, status } => {
-                format!("{name}  {size}  {}", status_text(status))
+                format!("{name}  {size}  {status}")
             }
         };
         let _ = writeln!(out, "{}{line}", "  ".repeat(depth));
         self::nodes(out, &node.children, depth + 1);
-    }
-}
-
-fn status_text(status: &Status) -> String {
-    match status {
-        Status::WindowsCanOpen => "Windows can open this".into(),
-        Status::Later => "supported in a later version".into(),
-        Status::NotSupported(why) => format!("not supported: {why}"),
-        Status::Unrecognized => "unrecognized".into(),
-        Status::Error(e) => format!("error: {e}"),
     }
 }
 
@@ -101,5 +91,22 @@ mod tests {
         assert!(text.contains("disk:0 "), "{text}");
         assert!(!text.contains("tiny-ext4"), "{text}");
         assert!(!text.contains(r"\"), "{text}");
+    }
+
+    /// The architecture is the build's (an x64 build also runs on ARM64 Windows), so it is
+    /// named next to the version, not as if it were the Windows edition.
+    #[test]
+    fn the_architecture_is_named_as_the_build_s() {
+        let text = diagnostics(&App::default());
+        let first = format!(
+            "TuxRead {} ({} build) diagnostics",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::ARCH
+        );
+        assert!(text.starts_with(&first), "{text}");
+        assert!(
+            text.lines().nth(1).unwrap().starts_with("elevated: "),
+            "{text}"
+        );
     }
 }

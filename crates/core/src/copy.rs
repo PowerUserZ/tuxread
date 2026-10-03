@@ -422,12 +422,10 @@ impl Copier<'_> {
             if self.cancelled() {
                 return Ok(false);
             }
-            let n = match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e),
-            };
+            let n = fill(reader, &mut buf)?;
+            if n == 0 {
+                break;
+            }
             file.write_all(buf.get(..n).unwrap_or_default())?;
             self.progress.bytes += n as u64;
             (self.on_progress)(&self.progress);
@@ -461,6 +459,22 @@ fn system_time(t: Timestamp) -> Option<SystemTime> {
         UNIX_EPOCH.checked_sub(Duration::from_secs(t.secs.unsigned_abs()))?
     };
     base.checked_add(Duration::from_nanos(u64::from(t.nanos)))
+}
+
+/// Reads into `buf` until it is full or the reader is done, and returns how much it read.
+/// Filesystem readers hand out one block per call; filling the chunk first means the copy
+/// writes in chunks of `CHUNK` (spec §6.2) instead of one block at a time.
+fn fill(reader: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while let Some(rest) = buf.get_mut(filled..).filter(|rest| !rest.is_empty()) {
+        match reader.read(rest) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(filled)
 }
 
 #[cfg(test)]
@@ -908,5 +922,28 @@ mod tests {
             })
             .is_some()
         );
+    }
+
+    /// A reader that hands out at most three bytes per call, like ext4-view's one block.
+    struct Trickle(Vec<u8>);
+
+    impl Read for Trickle {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = self.0.len().min(buf.len()).min(3);
+            buf[..n].copy_from_slice(&self.0[..n]);
+            self.0.drain(..n);
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn chunks_are_filled_before_they_are_written() {
+        let mut reader = Trickle((0..10u8).collect());
+        let mut buf = [0u8; 8];
+        assert_eq!(fill(&mut reader, &mut buf).unwrap(), 8);
+        assert_eq!(buf, [0, 1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(fill(&mut reader, &mut buf).unwrap(), 2);
+        assert_eq!(&buf[..2], [8, 9]);
+        assert_eq!(fill(&mut reader, &mut buf).unwrap(), 0);
     }
 }

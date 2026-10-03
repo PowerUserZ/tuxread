@@ -787,3 +787,33 @@ select {
 .note.error {
   color: var(--danger);
 }
+
+/* A partition Windows skips: the item opens the dialog that shows the fix. */
+.item.fixable {
+  cursor: pointer;
+}
+
+.item-note.fix-link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.steps {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+.script {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--side);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  user-select: text;
+}

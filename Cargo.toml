@@ -22,6 +22,7 @@ serde_json = "1"
 log = "0.4"
 tauri = "=2.11.6"
 tauri-build = "=2.6.3"
+tauri-winres = "=0.3.6"
 tauri-plugin-dialog = "=2.7.3"
 tauri-plugin-log = "=2.9.2"
 
@@ -30,5 +31,9 @@ sha2 = "0.10"
 base64 = "0.22"
 
 [patch.crates-io]
-# ext4-view 1.0.0 plus two fixes found by the corpus; see vendor/ext4-view/PATCHES.md.
+# ext4-view 1.0.0 plus the fixes that the corpus and the fuzz targets found; vendor/ext4-view/PATCHES.md lists them.
 ext4-view = { path = "vendor/ext4-view" }
+
+# Never set `panic = "abort"` in a profile: the engine turns a third-party parser's panic on a
+# malformed disk into an error (`guarded` in crates/core/src/part.rs), and abort would end the
+# program instead.

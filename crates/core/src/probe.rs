@@ -6,18 +6,51 @@ use crate::dev::{BlockDev, SliceDev};
 use crate::fs::ext::ExtFs;
 use crate::fs::{Fs, FsInfo};
 use crate::ident::{self, ExtInfo, Ident};
-use crate::part::{self, Partition, Table};
+use crate::part::{self, DiskId, Partition, Table, TypeCode};
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
     /// NTFS, FAT, exFAT, ReFS, BitLocker.
     WindowsCanOpen,
+    /// One of those in a partition whose type Windows does not mount (one made for Linux,
+    /// say): Windows shows nothing until the type changes.
+    WindowsSkips(TypeFix),
     /// Supported in a later TuxRead version (LUKS, LVM, Btrfs, XFS in v0.1).
     Later,
     NotSupported(String),
     Unrecognized,
     Error(String),
+}
+
+/// The status in words, as the CLI and the diagnostics print it.
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Status::WindowsCanOpen => f.write_str("Windows can open this"),
+            Status::WindowsSkips(fix) => write!(
+                f,
+                "Windows does not mount it: its partition type is {}",
+                fix.type_name
+            ),
+            Status::Later => f.write_str("supported in a later version"),
+            Status::NotSupported(why) => write!(f, "not supported: {why}"),
+            Status::Unrecognized => f.write_str("unrecognized"),
+            Status::Error(e) => write!(f, "error: {e}"),
+        }
+    }
+}
+
+/// What makes Windows mount a partition it skips: the partition at `offset` (bytes) on the
+/// disk `disk` gets the type `to` instead of `from`. Only the type changes, not the data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeFix {
+    pub disk: DiskId,
+    pub offset: u64,
+    pub from: TypeCode,
+    pub to: TypeCode,
+    /// `from` as the tree shows it ("Linux filesystem").
+    pub type_name: String,
 }
 
 /// A browsable filesystem.
@@ -109,10 +142,22 @@ fn partition_nodes(dev: &Arc<dyn BlockDev>, table: &Table) -> Vec<Node> {
         .partitions
         .iter()
         .map(|p| {
-            let child = match SliceDev::new(dev.clone(), p.start, p.len) {
+            let mut child = match SliceDev::new(dev.clone(), p.start, p.len) {
                 Ok(slice) => content_node(Arc::new(slice)),
                 Err(e) => detected("Unreadable", p.len, Status::Error(e.to_string())),
             };
+            if let NodeKind::Detected { name, status } = &mut child.kind
+                && *status == Status::WindowsCanOpen
+                && part::hides_from_windows(p.type_code)
+            {
+                *status = Status::WindowsSkips(TypeFix {
+                    disk: table.disk_id,
+                    offset: p.start,
+                    from: p.type_code,
+                    to: part::windows_type(table.kind, name),
+                    type_name: p.type_name.clone(),
+                });
+            }
             Node {
                 label: partition_label(p),
                 size: p.len,
@@ -266,6 +311,7 @@ mod tests {
     #[test]
     fn mbr_partitions_get_their_content_identified() {
         let mut disk = vec![0u8; 2 * 1024 * 1024];
+        disk[0x1B8..0x1BC].copy_from_slice(&0x1234_5678u32.to_le_bytes());
         // One Linux partition at sector 2048 (1 MiB) of 2048 sectors, holding an NTFS signature.
         disk[446 + 4] = 0x83;
         disk[446 + 8..446 + 12].copy_from_slice(&2048u32.to_le_bytes());
@@ -280,12 +326,148 @@ mod tests {
             NodeKind::Partition { number: 1, type_name } if type_name == "Linux"
         ));
         let leaves = leaves(&nodes);
+        // Windows mounts NTFS only in a partition typed for it (0x07), so it skips this one.
         assert!(matches!(
             &leaves[0].kind,
             NodeKind::Detected {
-                status: Status::WindowsCanOpen,
+                status: Status::WindowsSkips(fix),
                 ..
+            } if *fix == TypeFix {
+                disk: DiskId::Mbr(0x1234_5678),
+                offset: 1024 * 1024,
+                from: TypeCode::Mbr(0x83),
+                to: TypeCode::Mbr(0x07),
+                type_name: "Linux".into(),
             }
+        ));
+    }
+
+    const DISK_GUID: [u8; 16] = [7; 16];
+    const LINUX: [u8; 16] = [
+        0xAF, 0x3D, 0xC6, 0x0F, 0x83, 0x84, 0x72, 0x47, 0x8E, 0x79, 0x3D, 0x69, 0xD8, 0x47, 0x7D,
+        0xE4,
+    ];
+    const EFI: [u8; 16] = [
+        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11, 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9,
+        0x3B,
+    ];
+
+    /// The status of what a GPT disk's one partition (type `ty`, at 1 MiB) holds: `content` at its start.
+    fn gpt_status(ty: [u8; 16], content: &[(usize, &[u8])]) -> Status {
+        let mut cursor = std::io::Cursor::new(vec![0u8; 4 << 20]);
+        let mut gpt = gptman::GPT::new_from(&mut cursor, 512, DISK_GUID).unwrap();
+        gpt[1] = gptman::GPTPartitionEntry {
+            partition_type_guid: ty,
+            unique_partition_guid: [1; 16],
+            starting_lba: 2048,
+            ending_lba: 4095,
+            attribute_bits: 0,
+            partition_name: "primary".into(),
+        };
+        gpt.write_into(&mut cursor).unwrap();
+        let mut disk = cursor.into_inner();
+        for (at, bytes) in content {
+            disk[(1 << 20) + at..(1 << 20) + at + bytes.len()].copy_from_slice(bytes);
+        }
+        let nodes = probe(Arc::new(MemDev(disk)));
+        match &leaves(&nodes)[0].kind {
+            NodeKind::Detected { status, .. } => status.clone(),
+            _ => panic!("not a detected leaf"),
+        }
+    }
+
+    /// Linux tools give a partition the Linux type even when it is then formatted exFAT, and
+    /// Windows then shows nothing (seen on a real USB disk). The fix names that partition by the
+    /// disk's GUID and its offset.
+    #[test]
+    fn a_windows_filesystem_in_a_linux_partition_is_skipped_by_windows() {
+        let exfat: &[(usize, &[u8])] = &[(3, b"EXFAT   ")];
+        assert_eq!(
+            gpt_status(LINUX, exfat),
+            Status::WindowsSkips(TypeFix {
+                disk: DiskId::Gpt(DISK_GUID),
+                offset: 1 << 20,
+                from: TypeCode::Gpt(LINUX),
+                to: TypeCode::Gpt(part::BASIC_DATA),
+                type_name: "Linux filesystem".into(),
+            })
+        );
+        assert_eq!(gpt_status(part::BASIC_DATA, exfat), Status::WindowsCanOpen);
+        // Windows' own system partitions stay as they are: no fix is offered for them.
+        let fat: &[(usize, &[u8])] = &[(54, b"FAT16   "), (510, &[0x55, 0xAA])];
+        assert_eq!(gpt_status(EFI, fat), Status::WindowsCanOpen);
+    }
+
+    /// Only the Linux type is a mistake TuxRead may suggest undoing. Other types hide a Windows
+    /// boot sector on purpose (dynamic disks, Storage Spaces, OEM recovery), or the boot sector is
+    /// stale under another filesystem (ZFS keeps sector 0 as it was): changing them would let
+    /// Windows mount, and perhaps "repair", what another owner manages.
+    #[test]
+    fn no_fix_is_offered_for_types_that_hide_on_purpose() {
+        const LDM_DATA: [u8; 16] = [
+            0xA0, 0x60, 0x9B, 0xAF, 0x31, 0x14, 0x62, 0x4F, 0xBC, 0x68, 0x33, 0x11, 0x71, 0x4A,
+            0x69, 0xAD,
+        ];
+        const STORAGE_SPACES: [u8; 16] = [
+            0x8F, 0xAF, 0x5C, 0xE7, 0x80, 0xF6, 0xEE, 0x4C, 0xAF, 0xA3, 0xB0, 0x01, 0xE5, 0x6E,
+            0xFC, 0x2D,
+        ];
+        const ZFS: [u8; 16] = [
+            0xC3, 0x8C, 0x89, 0x6A, 0xD2, 0x1D, 0xB2, 0x11, 0x99, 0xA6, 0x08, 0x00, 0x20, 0x73,
+            0x66, 0x31,
+        ];
+        let ntfs: &[(usize, &[u8])] = &[(3, b"NTFS    ")];
+        assert_eq!(gpt_status(LDM_DATA, ntfs), Status::WindowsCanOpen);
+        assert_eq!(gpt_status(STORAGE_SPACES, ntfs), Status::WindowsCanOpen);
+        let zfs = 0x00BA_B10Cu64.to_le_bytes();
+        let zfs_over_ntfs: &[(usize, &[u8])] = &[(3, b"NTFS    "), (0x2_0000, &zfs)];
+        let zfs_member = Status::NotSupported("ZFS member".into());
+        assert_eq!(gpt_status(ZFS, zfs_over_ntfs), zfs_member);
+        assert_eq!(gpt_status(LINUX, zfs_over_ntfs), zfs_member);
+        let hfs_over_ntfs: &[(usize, &[u8])] = &[(3, b"NTFS    "), (1024, b"H+")];
+        assert_eq!(
+            gpt_status(LINUX, hfs_over_ntfs),
+            Status::NotSupported("HFS+".into())
+        );
+        for sys in [0x42, 0x17, 0x12, 0x27] {
+            assert_eq!(
+                mbr_status(sys, ntfs),
+                Status::WindowsCanOpen,
+                "type {sys:#x}"
+            );
+        }
+    }
+
+    /// The status of what an MBR disk's one partition (type `sys`, at 1 MiB) holds.
+    fn mbr_status(sys: u8, content: &[(usize, &[u8])]) -> Status {
+        let mut disk = vec![0u8; 2 * 1024 * 1024];
+        disk[446 + 4] = sys;
+        disk[446 + 8..446 + 12].copy_from_slice(&2048u32.to_le_bytes());
+        disk[446 + 12..446 + 16].copy_from_slice(&2048u32.to_le_bytes());
+        disk[510..512].copy_from_slice(&[0x55, 0xAA]);
+        for (at, bytes) in content {
+            disk[(1 << 20) + at..(1 << 20) + at + bytes.len()].copy_from_slice(bytes);
+        }
+        match &leaves(&probe(Arc::new(MemDev(disk))))[0].kind {
+            NodeKind::Detected { status, .. } => status.clone(),
+            _ => panic!("not a detected leaf"),
+        }
+    }
+
+    /// In an MBR, FAT needs the FAT32 (LBA) type; NTFS and exFAT share 0x07.
+    #[test]
+    fn an_mbr_fix_picks_the_type_for_the_filesystem() {
+        let mut disk = vec![0u8; 2 * 1024 * 1024];
+        disk[446 + 4] = 0x83;
+        disk[446 + 8..446 + 12].copy_from_slice(&2048u32.to_le_bytes());
+        disk[446 + 12..446 + 16].copy_from_slice(&2048u32.to_le_bytes());
+        disk[510..512].copy_from_slice(&[0x55, 0xAA]);
+        disk[(1 << 20) + 82..(1 << 20) + 90].copy_from_slice(b"FAT32   ");
+        disk[(1 << 20) + 510..(1 << 20) + 512].copy_from_slice(&[0x55, 0xAA]);
+        let nodes = probe(Arc::new(MemDev(disk)));
+        assert!(matches!(
+            &leaves(&nodes)[0].kind,
+            NodeKind::Detected { status: Status::WindowsSkips(fix), .. } if fix.to == TypeCode::Mbr(0x0C)
         ));
     }
 }

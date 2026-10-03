@@ -14,6 +14,9 @@ import {
 import { Dialog } from "./Dialog";
 import { formatMode, formatOctal, formatSize, formatTime } from "./format";
 import { type Key, type Lang, useI18n } from "./i18n";
+import { folderPath } from "./paths";
+import type { FixChoice } from "./Sidebar";
+import { fixScript } from "./windowsFix";
 
 const errorKey: Record<ErrorCode, Key> = {
   declined: "errDeclined",
@@ -114,6 +117,41 @@ export function AboutDialog({
   );
 }
 
+export function FixDialog({ choice, onClose }: { choice: FixChoice; onClose: () => void }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
+  const script = fixScript(choice.fix, t("fixNotFound"));
+  return (
+    <Dialog
+      title={t("fixTitle")}
+      wide
+      onClose={onClose}
+      actions={
+        <>
+          <button
+            type="button"
+            onClick={() => navigator.clipboard.writeText(script).then(() => setCopied("copied"), () => setCopied("failed"))}
+          >
+            {copied === "copied" ? t("fixCopied") : copied === "failed" ? t("fixCopyFailed") : t("fixCopy")}
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            {t("close")}
+          </button>
+        </>
+      }
+    >
+      <p>{t("fixWhy", { fs: choice.fs, type: choice.partType })}</p>
+      <ol className="steps">
+        <li>{t("fixStep1")}</li>
+        <li>{t("fixStep2")}</li>
+        <li>{t("fixStep3")}</li>
+      </ol>
+      <pre className="script">{script}</pre>
+      <p>{t("fixSafe")}</p>
+    </Dialog>
+  );
+}
+
 export function CopyDialog({
   count,
   onCopy,
@@ -139,13 +177,13 @@ export function CopyDialog({
     <Dialog
       title={count === 1 ? t("copyTitleOne") : t("copyTitleMany", { n: count })}
       onClose={onClose}
-      onSubmit={() => dest.trim() !== "" && onCopy(dest.trim(), conflict)}
+      onSubmit={() => folderPath(dest) !== "" && onCopy(folderPath(dest), conflict)}
       actions={
         <>
           <button type="button" onClick={onClose}>
             {t("cancel")}
           </button>
-          <button type="submit" className="primary" disabled={dest.trim() === ""}>
+          <button type="submit" className="primary" disabled={folderPath(dest) === ""}>
             {t("copy")}
           </button>
         </>

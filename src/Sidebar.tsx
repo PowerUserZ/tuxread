@@ -1,12 +1,15 @@
 // Disks and images, with what each holds (spec §5.9). Each opened source draws its partitions
 // as a bar, sized like on disk and colored by what TuxRead can do with them.
 import type { KeyboardEvent } from "react";
-import type { NodeView, SourceView, SourcesView } from "./api";
+import type { FixView, NodeView, SourceView, SourcesView } from "./api";
 import { formatSize } from "./format";
 import { type Key, useI18n } from "./i18n";
 import { DiskIcon, ImageIcon, LockIcon, PlusIcon } from "./icons";
 
 export type VolumeChoice = { volume: number; node: NodeView };
+
+/** A partition Windows skips, with what the fix dialog tells about it. */
+export type FixChoice = { fix: FixView; fs: string; partType: string };
 
 type Props = {
   sources: SourcesView;
@@ -17,14 +20,20 @@ type Props = {
   onChooseVolume: (choice: VolumeChoice) => void;
   onAbout: () => void;
   onDiagnostics: () => void;
+  onShowFix: (choice: FixChoice) => void;
 };
+
+/** True when volume `id` is somewhere under `nodes`. */
+function hasVolume(nodes: NodeView[], id: number): boolean {
+  return nodes.some((n) => n.volume === id || hasVolume(n.children, id));
+}
 
 /** What a top-level node holds, for its color on the bar. */
 function tone(node: NodeView): string {
   const leaf = node.kind === "partition" ? node.children[0] : node;
   if (!leaf) return "other";
   if (leaf.kind === "volume") return "linux";
-  if (leaf.status === "windows") return "windows";
+  if (leaf.status === "windows" || leaf.status === "windowsSkips") return "windows";
   if (leaf.status === "later") return "later";
   return "other";
 }
@@ -46,6 +55,7 @@ function DiskBar({ source }: { source: SourceView }) {
 
 const statusKey: Record<NonNullable<NodeView["status"]>, Key> = {
   windows: "statusWindows",
+  windowsSkips: "statusWindowsSkips",
   later: "statusLater",
   unsupported: "statusUnsupported",
   unrecognized: "statusUnrecognized",
@@ -69,8 +79,12 @@ function onTreeKey(e: KeyboardEvent<HTMLElement>) {
 export function Sidebar(props: Props) {
   const { t, lang } = useI18n();
   const { sources, current, opening } = props;
+  // The tree is one Tab stop, so Tab returns to where the user was: the chosen volume, or else
+  // the first item. Arrow keys move within the tree.
+  const atCurrent = current !== null && [...sources.disks, ...sources.images].some((s) => hasVolume(s.nodes, current));
 
-  const nodeItems = (nodes: NodeView[], level: number) =>
+  // On a disk, a partition Windows skips opens the dialog that shows how to change that.
+  const nodeItems = (nodes: NodeView[], level: number, disk: boolean) =>
     nodes.map((node, i) => (
       <li key={i} role="none">
         {node.kind === "volume" && node.volume !== null ? (
@@ -78,12 +92,27 @@ export function Sidebar(props: Props) {
             role="treeitem"
             aria-level={level}
             aria-selected={current === node.volume}
-            tabIndex={-1}
+            tabIndex={atCurrent && current === node.volume ? 0 : -1}
             className={current === node.volume ? "item volume current" : "item volume"}
             onClick={() => props.onChooseVolume({ volume: node.volume as number, node })}
           >
             <span className="item-name">{node.label}</span>
             <span className="item-size">{formatSize(node.size, lang)}</span>
+          </div>
+        ) : disk && node.fix ? (
+          <div
+            role="treeitem"
+            aria-level={level}
+            aria-haspopup="dialog"
+            tabIndex={-1}
+            title={t("statusWindowsSkips", { detail: node.detail ?? "" })}
+            className="item detected fixable"
+            onClick={() =>
+              node.fix && props.onShowFix({ fix: node.fix, fs: node.label, partType: node.detail ?? "" })
+            }
+          >
+            <span className="item-name">{node.label}</span>
+            <span className="item-note fix-link">{t("showFix")}</span>
           </div>
         ) : (
           <div role="treeitem" aria-level={level} tabIndex={-1} className={`item ${node.kind}`}>
@@ -96,12 +125,11 @@ export function Sidebar(props: Props) {
           </div>
         )}
         {node.children.length > 0 && (
-          <ul role="group">{nodeItems(node.children, level + 1)}</ul>
+          <ul role="group">{nodeItems(node.children, level + 1, disk)}</ul>
         )}
       </li>
     ));
 
-  // The tree is one Tab stop: its first item; arrow keys move within it.
   const first = sources.disks[0] ?? sources.images[0];
 
   const sourceItem = (source: SourceView) => {
@@ -112,7 +140,7 @@ export function Sidebar(props: Props) {
         <div
           role="treeitem"
           aria-level={1}
-          tabIndex={source === first ? 0 : -1}
+          tabIndex={!atCurrent && source === first ? 0 : -1}
           aria-busy={busy}
           title={locked ? t("diskLocked") : source.detail}
           className={locked ? "item source-head locked" : "item source-head"}
@@ -125,7 +153,7 @@ export function Sidebar(props: Props) {
         </div>
         {source.open && <DiskBar source={source} />}
         {source.open && source.nodes.length === 0 && <p className="item-note pad">{t("nothingFound")}</p>}
-        {source.nodes.length > 0 && <ul role="group">{nodeItems(source.nodes, 2)}</ul>}
+        {source.nodes.length > 0 && <ul role="group">{nodeItems(source.nodes, 2, source.kind === "disk")}</ul>}
       </li>
     );
   };

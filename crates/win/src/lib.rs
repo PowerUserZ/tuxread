@@ -24,4 +24,4 @@ pub mod helper;
 mod sys;
 
 #[cfg(windows)]
-pub use sys::is_elevated;
+pub use sys::{is_elevated, show_error};
