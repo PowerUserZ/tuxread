@@ -171,7 +171,7 @@ async fn diagnostics(ctx: Ctx<'_>) -> CmdResult<String> {
 /// window, which knows the chosen language, cannot open without it.
 const NO_WEBVIEW2: &str = "TuxRead needs the Microsoft Edge WebView2 Runtime, which is not installed for this account. Download it from https://developer.microsoft.com/microsoft-edge/webview2, install it, and start TuxRead again.
 
-TuxRead, bu hesapta kurulu olmayan Microsoft Edge WebView2 Runtime'a ihtiyaç duyar. https://developer.microsoft.com/microsoft-edge/webview2 adresinden indirip kurun, sonra TuxRead'i yeniden başlatın.";
+TuxRead'in çalışması için Microsoft Edge WebView2 Runtime gerekiyor ve bu hesapta kurulu değil. https://developer.microsoft.com/microsoft-edge/webview2 adresinden indirip kurun, sonra TuxRead'i yeniden başlatın.";
 
 pub fn run() {
     // Without the runtime Tauri shows its own error but then keeps running, windowless. This runs

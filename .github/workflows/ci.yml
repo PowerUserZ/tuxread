@@ -106,7 +106,9 @@ jobs:
           $cli = "target\release\tuxread-cli.exe"
           New-Item -ItemType Directory "$env:RUNNER_TEMP\from-image", "$env:RUNNER_TEMP\from-disk" | Out-Null
           & $cli cp corpus\mbr-logical.img 1 / "$env:RUNNER_TEMP\from-image"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           & $cli cp "disk:$disk" 1 / "$env:RUNNER_TEMP\from-disk"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           $a = Get-ChildItem -Recurse -File "$env:RUNNER_TEMP\from-image" | ForEach-Object { "{0} {1}" -f $_.FullName.Substring("$env:RUNNER_TEMP\from-image".Length), (Get-FileHash $_.FullName).Hash }
           $b = Get-ChildItem -Recurse -File "$env:RUNNER_TEMP\from-disk" | ForEach-Object { "{0} {1}" -f $_.FullName.Substring("$env:RUNNER_TEMP\from-disk".Length), (Get-FileHash $_.FullName).Hash }
           if (Compare-Object $a $b) { Write-Error "the disk and the image copies differ"; exit 1 }

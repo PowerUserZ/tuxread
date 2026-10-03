@@ -1,5 +1,5 @@
 # cargo-deny (spec §5.4, §7.6): every dependency's license must be compatible with
-# MIT OR Apache-2.0, GPL, LGPL and AGPL are never accepted, and RustSec advisories fail CI.
+# MIT OR Apache-2.0 (GPL, LGPL and AGPL never are), and RustSec advisories fail CI.
 # Run: cargo deny check licenses advisories
 
 [graph]

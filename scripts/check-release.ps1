@@ -7,7 +7,8 @@
 # - the installer asks for no administrator rights.
 # With -Install it also installs silently into a folder with spaces and non-ASCII letters (as in
 # a user profile named "Şükrü Yılmaz"), checks the installed files, starts the installed program,
-# and uninstalls again (CI only: it changes the current user's programs).
+# and uninstalls again. That changes the current user's programs: run -Install in CI, or on a
+# machine where that is fine.
 # Usage: scripts/check-release.ps1 -Arch x64|arm64 -Dir <folder> [-Install]
 param(
     [Parameter(Mandatory = $true)][ValidateSet('x64', 'arm64')][string]$Arch,
@@ -15,6 +16,8 @@ param(
     [switch]$Install
 )
 $ErrorActionPreference = 'Stop'
+# .NET calls below resolve a relative path against the process's folder, not PowerShell's.
+$Dir = (Resolve-Path $Dir).Path
 $root = Split-Path $PSScriptRoot
 $version = (Get-Content "$root\package.json" -Raw | ConvertFrom-Json).version
 $name = "TuxRead-$version-$Arch"

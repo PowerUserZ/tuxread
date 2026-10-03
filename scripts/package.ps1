@@ -14,6 +14,8 @@ $version = (Get-Content "$root\package.json" -Raw | ConvertFrom-Json).version
 $built = "$root\target\release"
 $name = "TuxRead-$version-$Arch"
 New-Item -ItemType Directory -Force $Out | Out-Null
+# .NET calls below resolve a relative path against the process's folder, not PowerShell's.
+$Out = (Resolve-Path $Out).Path
 
 Copy-Item "$built\bundle\nsis\TuxRead_${version}_$Arch-setup.exe" "$Out\$name-setup.exe"
 
