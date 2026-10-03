@@ -26,8 +26,8 @@ if (!existsSync(exe)) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// WebView2 picks a free port (a fixed one can sit in a range Windows reserves) and writes it to
-// DevToolsActivePort in the profile.
+// WebView2 picks a free port and writes it to DevToolsActivePort in the profile. A fixed port
+// fails whenever something else holds it, such as the last scenario's WebView2 while it exits.
 const devtools = (profile) => {
   let port;
   try {
@@ -122,8 +122,8 @@ async function launch() {
     async close() {
       ws.close();
       app.kill();
-      // Wait for WebView2 to let go of the port and the profile before the next scenario.
-      for (let i = 0; i < 50 && (await devtools()); i++) await sleep(100);
+      // WebView2 holds the profile for a moment after the app ends. Each scenario gets its own
+      // port, so only the profile is waited for.
       for (let i = 0; i < 20; i++) {
         try {
           rmSync(profile, { recursive: true, force: true });

@@ -62,7 +62,8 @@ UAC at its default setting, so that it prompts.
     `node scripts/smoke/run.mjs <TuxRead.exe> disk` with `TUXREAD_SMOKE_DISK` set to its number.
     CI runs the other scenarios; this one needs a UAC prompt, which CI runners do not show.
 15. **ARM64.** If an ARM64 PC is at hand, install `TuxRead-X.Y.Z-arm64-setup.exe` there, open an
-    image and copy from it. CI checks the ARM64 files but does not run the window on ARM64.
+    image and copy from it. CI installs the ARM64 build and opens its window, but browses and
+    copies only with the x64 build.
 
 ## 4. Publish
 
