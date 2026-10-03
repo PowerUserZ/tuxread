@@ -125,17 +125,20 @@ async fn copy(
     conflict: ConflictArg,
     on_event: Channel<JobEvent>,
 ) -> CmdResult<u32> {
+    let shared = Arc::clone(&ctx);
     blocking(ctx, move |s| {
         let slot = s.app.volume(volume)?;
         let paths = slot
             .worker()
             .and_then(|w| w.call(move |session| session.paths(&entries))?)
             .map_err(|e| s.app.explain(&slot, e))?;
+        let on = Arc::clone(&slot);
         s.jobs.start(
             slot.volume.clone(),
             paths,
             PathBuf::from(dest),
             conflict.into(),
+            move |e| shared.app.explain(&on, e),
             move |event| {
                 let _ = on_event.send(event);
             },

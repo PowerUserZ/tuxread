@@ -85,13 +85,15 @@ pub struct Jobs {
 
 impl Jobs {
     /// Starts copying `sources` (raw paths on `volume`) into `dest`; `send` receives the
-    /// job's events, ending with `Finished`. Returns the job's number.
+    /// job's events, ending with `Finished`. Returns the job's number. An error that stops
+    /// the job from starting goes through `explain` first, as the commands' errors do.
     pub fn start(
         &self,
         volume: Volume,
         sources: Vec<Vec<u8>>,
         dest: PathBuf,
         conflict: Conflict,
+        explain: impl Fn(CommandError) -> CommandError + Send + 'static,
         send: impl Fn(JobEvent) + Send + 'static,
     ) -> CmdResult<u32> {
         // Checked here, not per file: otherwise a typo fails every file, and a relative path
@@ -137,7 +139,7 @@ impl Jobs {
                         );
                         (report, None)
                     }
-                    Err(e) => (Report::default(), Some(CommandError::from(e))),
+                    Err(e) => (Report::default(), Some(explain(CommandError::from(e)))),
                 };
                 let finished = finished_event(&report, error);
                 // The report is kept before `Finished` goes out, so the window can ask for it.
@@ -300,6 +302,7 @@ mod tests {
                 vec![b"/".to_vec()],
                 dest.clone(),
                 Conflict::KeepBoth,
+                |e| e,
                 move |e| {
                     let _ = tx.send(e);
                 },
@@ -352,6 +355,7 @@ mod tests {
                 vec![b"/".to_vec()],
                 temp_dir("cancel"),
                 Conflict::KeepBoth,
+                |e| e,
                 move |e| {
                     let _guard = wait.lock();
                     let _ = tx.send(e);
@@ -389,6 +393,7 @@ mod tests {
                     vec![b"/".to_vec()],
                     dest.clone(),
                     Conflict::KeepBoth,
+                    |e| e,
                     |_| {},
                 )
                 .unwrap_err();
@@ -399,5 +404,35 @@ mod tests {
             1,
             "nothing was created"
         );
+    }
+
+    #[test]
+    fn a_copy_that_cannot_open_its_volume_says_why() {
+        // The error passes through `explain`, which turns it into "helper gone" when the
+        // volume's disk lost its helper (sources::App::explain).
+        let app = App::default();
+        let jobs = Jobs::default();
+        let mut volume = tiny_volume(&app);
+        volume.dev = Arc::new(tuxread_core::dev::MemDev(vec![0u8; 4096]));
+        let (tx, rx) = mpsc::channel();
+        jobs.start(
+            volume,
+            vec![b"/".to_vec()],
+            temp_dir("open"),
+            Conflict::KeepBoth,
+            |e| CommandError::new(Code::HelperGone, e.message),
+            move |e| {
+                let _ = tx.send(e);
+            },
+        )
+        .unwrap();
+        let last = rx.iter().last().unwrap();
+        let JobEvent::Finished {
+            error: Some(error), ..
+        } = last
+        else {
+            panic!("{last:?}")
+        };
+        assert_eq!(error.code, Code::HelperGone);
     }
 }
