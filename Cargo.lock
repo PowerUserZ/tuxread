@@ -364,6 +364,7 @@ name = "tuxread-cli"
 version = "0.1.0"
 dependencies = [
  "tuxread-core",
+ "tuxread-win",
 ]
 
 [[package]]
@@ -377,6 +378,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "tuxread-win"
+version = "0.1.0"
+dependencies = [
+ "tuxread-core",
+ "windows-sys",
 ]
 
 [[package]]
@@ -431,6 +440,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "windows-link"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "windows-sys"
+version = "0.61.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]
