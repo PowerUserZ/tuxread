@@ -1,0 +1,31 @@
+[package]
+name = "tuxread-app"
+description = "TuxRead: browse and copy files from Linux filesystems on Windows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "tuxread_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "TuxRead"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+tuxread-core.workspace = true
+tuxread-win.workspace = true
+tauri.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-log.workspace = true
+serde.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

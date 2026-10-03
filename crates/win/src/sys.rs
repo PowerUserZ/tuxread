@@ -289,9 +289,15 @@ impl Process {
     }
 }
 
-/// Starts `exe params` with a hidden window, through UAC (`runas`) when `elevate`.
-/// A declined UAC prompt fails with `ERROR_CANCELLED`.
-pub fn shell_execute(exe: &std::path::Path, params: &str, elevate: bool) -> io::Result<Process> {
+/// Starts `exe params` with a hidden window, through UAC (`runas`) when `elevate`, with the
+/// window `owner` (or 0) owning the prompt. A declined UAC prompt fails with
+/// `ERROR_CANCELLED`.
+pub fn shell_execute(
+    exe: &std::path::Path,
+    params: &str,
+    elevate: bool,
+    owner: isize,
+) -> io::Result<Process> {
     use windows_sys::Win32::UI::Shell::{
         SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
         ShellExecuteExW,
@@ -304,6 +310,7 @@ pub fn shell_execute(exe: &std::path::Path, params: &str, elevate: bool) -> io::
     let mut info = SHELLEXECUTEINFOW {
         cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
         fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        hwnd: ptr::without_provenance_mut(owner as usize),
         lpVerb: verb.as_ptr(),
         lpFile: file.as_ptr(),
         lpParameters: params.as_ptr(),

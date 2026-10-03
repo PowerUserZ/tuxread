@@ -1,0 +1,789 @@
+/* TuxRead: navy and amber from the icon, Windows 11's own type, one bold element (the disk bars). */
+:root {
+  --bg: #f4f6f9;
+  --pane: #ffffff;
+  --side: #eef1f6;
+  --ink: #1a2232;
+  --muted: #5b687e;
+  --line: #dde2ea;
+  --hover: #e6ebf3;
+  --select: #dce7f7;
+  --select-ink: #1d3a66;
+  --focus: #b06a00;
+  --accent: #f2a516;
+  --accent-ink: #7a4b00;
+  --navy: #2b3b63;
+  --linux: #f2a516;
+  --windows: #6f86ad;
+  --later: #a7b3c6;
+  --other: #c9d0dc;
+  --danger: #a3261b;
+  --danger-bg: #fbeceb;
+  --row: 28px;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--bg);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121826;
+    --pane: #182031;
+    --side: #141b2a;
+    --ink: #e5eaf2;
+    --muted: #95a1b6;
+    --line: #273149;
+    --hover: #212b40;
+    --select: #233a63;
+    --select-ink: #e5eefc;
+    --focus: #f2b13c;
+    --accent-ink: #f6c766;
+    --navy: #8ea3cf;
+    --windows: #5a73a0;
+    --later: #4a566c;
+    --other: #343e52;
+    --danger: #ff8f84;
+    --danger-bg: #3a1f22;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+button,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.icon {
+  flex: none;
+}
+
+/* Buttons */
+button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--pane);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--navy);
+  filter: brightness(1.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  button.primary {
+    color: #10172a;
+  }
+}
+
+button.ghost,
+button.link {
+  border-color: transparent;
+  background: transparent;
+}
+
+button.link {
+  padding: 0 6px;
+  min-height: 26px;
+  color: var(--muted);
+}
+
+.icon-button {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* Layout */
+.app {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) 1fr;
+  /* One row exactly as tall as the window, so the file list scrolls instead of growing. */
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--pane);
+}
+
+/* Sidebar */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--side);
+  border-right: 1px solid var(--line);
+}
+
+.tree-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 8px;
+}
+
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sidebar ul[role="group"] {
+  margin-left: 14px;
+  border-left: 1px solid var(--line);
+  padding-left: 4px;
+}
+
+.heading {
+  margin: 14px 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.heading:first-child {
+  margin-top: 2px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-size,
+.item-note {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.item-note {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-note.pad {
+  margin: 2px 10px;
+}
+
+.source-head {
+  font-weight: 600;
+  cursor: default;
+}
+
+.source-head.locked {
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.source-head.locked:hover,
+.item.volume:hover {
+  background: var(--hover);
+}
+
+.item.volume {
+  cursor: pointer;
+}
+
+.item.volume.current {
+  background: var(--select);
+  color: var(--select-ink);
+}
+
+.item.partition,
+.item.detected {
+  color: var(--muted);
+}
+
+.source + .source {
+  margin-top: 6px;
+}
+
+/* The disk bar: partitions in order, sized by their share of the disk. */
+.diskbar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  margin: 2px 8px 6px 32px;
+}
+
+.seg {
+  flex-basis: 0;
+  min-width: 4px;
+  border-radius: 3px;
+}
+
+.seg.linux {
+  background: var(--linux);
+}
+
+.seg.windows {
+  background: var(--windows);
+}
+
+.seg.later {
+  background: repeating-linear-gradient(135deg, var(--later) 0 3px, transparent 3px 6px);
+  outline: 1px solid var(--later);
+  outline-offset: -1px;
+}
+
+.seg.other {
+  background: var(--other);
+}
+
+.seg.free {
+  min-width: 0;
+}
+
+.open-image {
+  margin: 10px 4px;
+}
+
+.sidebar-foot {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* Toolbar and path */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.nav,
+.actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.pathbar {
+  flex: 1;
+  min-width: 0;
+}
+
+.pathbar ol {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0 4px;
+  min-height: 32px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.pathbar li {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.pathbar li + li::before {
+  content: "/";
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.pathbar button {
+  min-height: 26px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pathbar button[aria-current="page"] {
+  font-weight: 600;
+  cursor: default;
+}
+
+/* Banners */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 12px 0;
+  padding: 6px 6px 6px 12px;
+  border-radius: 6px;
+  background: var(--select);
+}
+
+.banner p {
+  flex: 1;
+  margin: 0;
+}
+
+.banner.error {
+  background: var(--danger-bg);
+}
+
+.banner.error strong {
+  color: var(--danger);
+}
+
+.detail {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* File list */
+.filelist {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The rows are positioned and would cover an outline, so the focus ring is drawn on top. */
+.filelist:focus-visible {
+  outline: none;
+}
+
+.filelist:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 96px 170px 112px 96px;
+  align-items: center;
+  height: var(--row);
+  padding: 0 12px;
+}
+
+.body .row:not(.head) {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.row > div {
+  min-width: 0;
+  padding-right: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Inside the scrolling area, so header and rows share the same width. */
+.row.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 32px;
+  border-bottom: 1px solid var(--line);
+  background: var(--pane);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.row.head button {
+  min-height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+}
+
+.body {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.body .row:not(.head):hover {
+  background: var(--hover);
+}
+
+.body .row.selected {
+  background: var(--select);
+  color: var(--select-ink);
+}
+
+.filelist:focus-within .row.focused {
+  box-shadow: inset 2px 0 var(--focus);
+}
+
+.row.damaged {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.c-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.c-name .icon {
+  color: var(--muted);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c-size {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.c-time,
+.c-owner {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.body .row:not(.head) .c-mode {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.body .row.selected .c-time,
+.body .row.selected .c-mode,
+.body .row.selected .c-owner,
+.body .row.selected .c-name .icon {
+  color: inherit;
+}
+
+.empty {
+  margin: 48px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Status bar */
+.statusbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+/* Dialogs */
+.dialog {
+  width: min(460px, calc(100vw - 32px));
+  padding: 20px 22px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--pane);
+  color: var(--ink);
+  box-shadow: 0 16px 48px rgb(10 18 36 / 0.28);
+}
+
+.dialog.wide {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.dialog::backdrop {
+  background: rgb(10 18 36 / 0.32);
+}
+
+.dialog h2 {
+  margin: 0 0 12px;
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.dialog-body p {
+  margin: 0 0 10px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  border: none;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0;
+}
+
+select {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--pane);
+}
+
+.version {
+  color: var(--muted);
+}
+
+.props {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.props div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+}
+
+.props dt {
+  color: var(--muted);
+}
+
+.props dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Copying: the job panel, the copy options and the report */
+.jobs {
+  border-top: 1px solid var(--line);
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.job + .job {
+  border-top: 1px solid var(--line);
+}
+
+.job-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.job-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-line {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-line.warn,
+.job-line.error {
+  color: var(--danger);
+}
+
+.current {
+  margin-left: 8px;
+}
+
+/* The copy does not know its total in advance, so the bar only shows that work goes on. */
+.bar {
+  width: 120px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--accent);
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar span {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
+
+.dest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dest input {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.radio input {
+  accent-color: var(--navy);
+}
+
+.report {
+  max-height: 46vh;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.report li {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 2px 12px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.report li:last-child {
+  border-bottom: none;
+}
+
+.report .outcome {
+  color: var(--muted);
+}
+
+.report .failed .outcome {
+  color: var(--danger);
+}
+
+.report .source {
+  overflow-wrap: anywhere;
+}
+
+.report .why {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.note.error {
+  color: var(--danger);
+}
