@@ -17,3 +17,4 @@
 
 # Release build output (scripts/third-party-licenses.mjs, scripts/package.ps1)
 /THIRD-PARTY-LICENSES.txt
+/release/
