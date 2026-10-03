@@ -53,13 +53,13 @@ jobs:
           name: corpus
           path: corpus
       - run: rustup update stable --no-self-update && rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # tuxread-app is Windows-only: Tauri's Windows backend and tuxread-win's disk access.
       - run: cargo clippy --locked --workspace --exclude tuxread-app --all-targets -- -D warnings
       - run: cargo test --locked --workspace --exclude tuxread-app
         env:
           TUXREAD_CORPUS: ${{ github.workspace }}/corpus
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check licenses advisories
 
@@ -81,7 +81,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: rustup update stable --no-self-update; rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all -- --check
       - run: npm ci
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
