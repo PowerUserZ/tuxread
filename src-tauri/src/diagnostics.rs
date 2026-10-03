@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use tuxread_core::probe::{Node, NodeKind, Status};
+use tuxread_core::probe::{Node, NodeKind};
 use tuxread_win::disk::list_disks;
 
 use crate::sources::{App, lock};
@@ -54,21 +54,11 @@ fn nodes(out: &mut String, nodes: &[Node], depth: usize) {
             }
             NodeKind::Volume(v) => format!("{} volume  {size}", v.info.fs_type),
             NodeKind::Detected { name, status } => {
-                format!("{name}  {size}  {}", status_text(status))
+                format!("{name}  {size}  {status}")
             }
         };
         let _ = writeln!(out, "{}{line}", "  ".repeat(depth));
         self::nodes(out, &node.children, depth + 1);
-    }
-}
-
-fn status_text(status: &Status) -> String {
-    match status {
-        Status::WindowsCanOpen => "Windows can open this".into(),
-        Status::Later => "supported in a later version".into(),
-        Status::NotSupported(why) => format!("not supported: {why}"),
-        Status::Unrecognized => "unrecognized".into(),
-        Status::Error(e) => format!("error: {e}"),
     }
 }
 

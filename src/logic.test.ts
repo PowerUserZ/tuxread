@@ -4,6 +4,7 @@ import { formatMode, formatOctal, formatSize, formatTime } from "./format";
 import { pickLang, translate } from "./i18n";
 import { click, emptySelection, move, selectAll, sortEntries } from "./listing";
 import { folderPath } from "./paths";
+import { fixScript } from "./windowsFix";
 
 const entry = (id: number, name: string, kind: EntryView["kind"], size = 0, mtime: number | null = 0): EntryView => ({
   id,
@@ -145,5 +146,39 @@ describe("paths", () => {
     expect(folderPath('"')).toBe('"');
     expect(folderPath('C:\\a "b"')).toBe('C:\\a "b"');
     expect(folderPath("   ")).toBe("");
+  });
+});
+
+describe("windows fix", () => {
+  it("finds a GPT partition by the disk's GUID, its offset and its type before changing it", () => {
+    const fix = {
+      table: "gpt" as const,
+      disk: "{5eae9c6e-b1a2-4be1-b33c-d406eab75dc1}",
+      offset: 1048576,
+      from: "{0fc63daf-8483-4772-8e79-3d69d8477de4}",
+      to: "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}",
+    };
+    expect(fixScript(fix, "Not found: nothing was changed.")).toBe(
+      [
+        "$p = Get-Disk | Where-Object Guid -eq '{5eae9c6e-b1a2-4be1-b33c-d406eab75dc1}' | Get-Partition | Where-Object { $_.Offset -eq 1048576 -and $_.GptType -eq '{0fc63daf-8483-4772-8e79-3d69d8477de4}' }",
+        "if ($p) {",
+        "    $p | Set-Partition -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'",
+        "    $p = $p | Get-Partition",
+        "    if (-not [char]::IsLetter($p.DriveLetter)) { $p | Add-PartitionAccessPath -AssignDriveLetter }",
+        "    $p | Get-Partition | Get-Volume | Format-List DriveLetter, FileSystemType, FileSystemLabel",
+        "} else {",
+        "    'Not found: nothing was changed.'",
+        "}",
+      ].join("\n"),
+    );
+  });
+
+  it("uses the MBR signature and type numbers, and quotes the message", () => {
+    const fix = { table: "mbr" as const, disk: "305419896", offset: 65536, from: "131", to: "7" };
+    const script = fixScript(fix, "TuxRead'in bulamadığı bölüm");
+    expect(script).toContain("Where-Object Signature -eq 305419896 |");
+    expect(script).toContain("$_.Offset -eq 65536 -and $_.MbrType -eq 131 }");
+    expect(script).toContain("Set-Partition -MbrType 7\n");
+    expect(script).toContain("'TuxRead''in bulamadığı bölüm'");
   });
 });

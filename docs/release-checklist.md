@@ -61,7 +61,11 @@ UAC at its default setting, so that it prompts.
     (`scripts/attach-vhd.ps1`, elevated) and run
     `node scripts/smoke/run.mjs <TuxRead.exe> disk` with `TUXREAD_SMOKE_DISK` set to its number.
     CI runs the other scenarios; this one needs a UAC prompt, which CI runners do not show.
-15. **ARM64.** If an ARM64 PC is at hand, install `TuxRead-X.Y.Z-arm64-setup.exe` there, open an
+15. **Hidden from Windows.** Give an exFAT partition on a test disk (a VHD will do) the type
+    "Linux filesystem": Windows stops showing it. TuxRead marks it "Hidden from Windows: how to
+    show it". The dialog's commands, pasted into an administrator PowerShell, make it a drive
+    again with its files; run a second time, they say nothing was found and change nothing.
+16. **ARM64.** If an ARM64 PC is at hand, install `TuxRead-X.Y.Z-arm64-setup.exe` there, open an
     image and copy from it. CI installs the ARM64 build and opens its window, but browses and
     copies only with the x64 build.
 

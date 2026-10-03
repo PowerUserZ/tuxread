@@ -19,13 +19,18 @@ export type CommandError = { code: ErrorCode; message: string };
 
 export type FsView = { fsType: string; label: string; uuid: string; size: number; used: number };
 
+/** A partition Windows skips, in PowerShell's terms: Get-Disk's Guid or Signature, and
+ *  Get-Partition's Offset and GptType or MbrType now and after the fix. */
+export type FixView = { table: "gpt" | "mbr"; disk: string; offset: number; from: string; to: string };
+
 export type NodeView = {
   label: string;
   size: number;
   kind: "partition" | "volume" | "detected";
   volume: number | null;
-  status: "windows" | "later" | "unsupported" | "unrecognized" | "error" | null;
+  status: "windows" | "windowsSkips" | "later" | "unsupported" | "unrecognized" | "error" | null;
   detail: string | null;
+  fix: FixView | null;
   fs: FsView | null;
   children: NodeView[];
 };

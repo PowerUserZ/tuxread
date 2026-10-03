@@ -18,14 +18,14 @@ import {
   openImage,
   stat,
 } from "./api";
-import { AboutDialog, CopyDialog, ErrorText, PropertiesDialog, ReportDialog } from "./dialogs";
+import { AboutDialog, CopyDialog, ErrorText, FixDialog, PropertiesDialog, ReportDialog } from "./dialogs";
 import { FileList } from "./FileList";
 import { formatSize } from "./format";
 import { I18n, type Lang, type T, pickLang, translate } from "./i18n";
 import { BackIcon, RefreshIcon, UpIcon } from "./icons";
 import { type Job, JobPanel } from "./JobPanel";
 import { type Selection, type Sort, type SortKey, click, emptySelection, move, selectAll, sortEntries } from "./listing";
-import { Sidebar, type VolumeChoice } from "./Sidebar";
+import { type FixChoice, Sidebar, type VolumeChoice } from "./Sidebar";
 
 type Place = { volume: number; dir: number };
 type Open =
@@ -33,7 +33,8 @@ type Open =
   | { kind: "copy" }
   | { kind: "report"; job: number }
   | { kind: "props"; props: Properties }
-  | { kind: "about" };
+  | { kind: "about" }
+  | { kind: "fix"; choice: FixChoice };
 
 const LANG_KEY = "tuxread.language";
 
@@ -290,6 +291,7 @@ export function App() {
           onOpenImage={() => void onOpenImage()}
           onChooseVolume={chooseVolume}
           onAbout={() => setDialog({ kind: "about" })}
+          onShowFix={(choice) => setDialog({ kind: "fix", choice })}
           onDiagnostics={onDiagnostics}
         />
         <main className="main">
@@ -386,6 +388,7 @@ export function App() {
         )}
         {dialog?.kind === "report" && <ReportDialog job={dialog.job} onClose={() => setDialog(null)} />}
         {dialog?.kind === "props" && <PropertiesDialog props={dialog.props} onClose={() => setDialog(null)} />}
+        {dialog?.kind === "fix" && <FixDialog choice={dialog.choice} onClose={() => setDialog(null)} />}
         {dialog?.kind === "about" && (
           <AboutDialog
             stored={stored}

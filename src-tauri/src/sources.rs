@@ -8,7 +8,8 @@ use serde::Serialize;
 use tuxread_core::cache::CachedDev;
 use tuxread_core::dev::{BlockDev, FileDev};
 use tuxread_core::fs::FsInfo;
-use tuxread_core::probe::{self, Node, NodeKind, Status, Volume};
+use tuxread_core::part::{self, DiskId, TypeCode};
+use tuxread_core::probe::{self, Node, NodeKind, Status, TypeFix, Volume};
 use tuxread_win::disk::{DiskInfo, WinDisk, list_disks};
 use tuxread_win::helper::{self, Helper, HelperDisk};
 
@@ -35,11 +36,30 @@ pub struct NodeView {
     pub kind: &'static str,
     /// For volumes: the number list_dir, stat and copy take.
     pub volume: Option<u32>,
-    /// For detected content: "windows", "later", "unsupported", "unrecognized" or "error".
+    /// For detected content: "windows", "windowsSkips", "later", "unsupported",
+    /// "unrecognized" or "error".
     pub status: Option<&'static str>,
     pub detail: Option<String>,
+    /// For "windowsSkips": what makes Windows mount the partition.
+    pub fix: Option<FixView>,
     pub fs: Option<FsView>,
     pub children: Vec<NodeView>,
+}
+
+/// A partition Windows skips, as PowerShell's storage commands name it: the window turns this
+/// into the commands it shows (src/windowsFix.ts).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FixView {
+    /// "gpt" or "mbr".
+    pub table: &'static str,
+    /// `Get-Disk`'s Guid ("{…}") for GPT, or its Signature (decimal) for MBR.
+    pub disk: String,
+    /// `Get-Partition`'s Offset, in bytes.
+    pub offset: u64,
+    /// The partition's GptType ("{…}") or MbrType (decimal) now, and the one Windows mounts.
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -253,6 +273,7 @@ impl Registry {
             volume: None,
             status: None,
             detail: None,
+            fix: None,
             fs: None,
             children,
         };
@@ -277,6 +298,10 @@ impl Registry {
                 view.kind = "detected";
                 let (name, detail) = match status {
                     Status::WindowsCanOpen => ("windows", None),
+                    Status::WindowsSkips(fix) => {
+                        view.fix = Some(fix_view(fix));
+                        ("windowsSkips", Some(display_name(fix.type_name.as_bytes())))
+                    }
                     Status::Later => ("later", None),
                     Status::NotSupported(why) => ("unsupported", Some(why.clone())),
                     Status::Unrecognized => ("unrecognized", None),
@@ -287,6 +312,25 @@ impl Registry {
             }
         }
         view
+    }
+}
+
+fn fix_view(fix: &TypeFix) -> FixView {
+    let guid = |g: &[u8; 16]| format!("{{{}}}", part::guid_string(g).to_lowercase());
+    let code = |c: &TypeCode| match c {
+        TypeCode::Gpt(g) => guid(g),
+        TypeCode::Mbr(b) => b.to_string(),
+    };
+    let (table, disk) = match fix.disk {
+        DiskId::Gpt(g) => ("gpt", guid(&g)),
+        DiskId::Mbr(signature) => ("mbr", signature.to_string()),
+    };
+    FixView {
+        table,
+        disk,
+        offset: fix.offset,
+        from: code(&fix.from),
+        to: code(&fix.to),
     }
 }
 
@@ -406,5 +450,53 @@ mod tests {
         assert!(lock(&app.registry).disks.is_empty());
         assert_eq!(app.volume(volume).err().unwrap().code, Code::NotFound);
         assert!(app.volume(image.nodes[0].volume.unwrap()).is_ok());
+    }
+
+    /// The window builds PowerShell commands from this, so it is in Get-Disk's and
+    /// Get-Partition's own forms. The GUID is the USB disk this was found on.
+    #[test]
+    fn a_partition_windows_skips_is_named_as_powershell_names_it() {
+        let usb = [
+            0x6E, 0x9C, 0xAE, 0x5E, 0xA2, 0xB1, 0xE1, 0x4B, 0xB3, 0x3C, 0xD4, 0x06, 0xEA, 0xB7,
+            0x5D, 0xC1,
+        ];
+        let linux = [
+            0xAF, 0x3D, 0xC6, 0x0F, 0x83, 0x84, 0x72, 0x47, 0x8E, 0x79, 0x3D, 0x69, 0xD8, 0x47,
+            0x7D, 0xE4,
+        ];
+        let gpt = TypeFix {
+            disk: DiskId::Gpt(usb),
+            offset: 1 << 20,
+            from: TypeCode::Gpt(linux),
+            to: TypeCode::Gpt(part::BASIC_DATA),
+            type_name: "Linux filesystem".into(),
+        };
+        assert_eq!(
+            fix_view(&gpt),
+            FixView {
+                table: "gpt",
+                disk: "{5eae9c6e-b1a2-4be1-b33c-d406eab75dc1}".into(),
+                offset: 1 << 20,
+                from: "{0fc63daf-8483-4772-8e79-3d69d8477de4}".into(),
+                to: "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}".into(),
+            }
+        );
+        let mbr = TypeFix {
+            disk: DiskId::Mbr(0x1234_5678),
+            offset: 65536,
+            from: TypeCode::Mbr(0x83),
+            to: TypeCode::Mbr(0x07),
+            type_name: "Linux".into(),
+        };
+        let view = fix_view(&mbr);
+        assert_eq!(
+            (
+                view.table,
+                view.disk.as_str(),
+                view.from.as_str(),
+                view.to.as_str()
+            ),
+            ("mbr", "305419896", "131", "7")
+        );
     }
 }

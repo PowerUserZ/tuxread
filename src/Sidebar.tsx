@@ -1,12 +1,15 @@
 // Disks and images, with what each holds (spec §5.9). Each opened source draws its partitions
 // as a bar, sized like on disk and colored by what TuxRead can do with them.
 import type { KeyboardEvent } from "react";
-import type { NodeView, SourceView, SourcesView } from "./api";
+import type { FixView, NodeView, SourceView, SourcesView } from "./api";
 import { formatSize } from "./format";
 import { type Key, useI18n } from "./i18n";
 import { DiskIcon, ImageIcon, LockIcon, PlusIcon } from "./icons";
 
 export type VolumeChoice = { volume: number; node: NodeView };
+
+/** A partition Windows skips, with what the fix dialog tells about it. */
+export type FixChoice = { fix: FixView; fs: string; partType: string };
 
 type Props = {
   sources: SourcesView;
@@ -17,6 +20,7 @@ type Props = {
   onChooseVolume: (choice: VolumeChoice) => void;
   onAbout: () => void;
   onDiagnostics: () => void;
+  onShowFix: (choice: FixChoice) => void;
 };
 
 /** True when volume `id` is somewhere under `nodes`. */
@@ -29,7 +33,7 @@ function tone(node: NodeView): string {
   const leaf = node.kind === "partition" ? node.children[0] : node;
   if (!leaf) return "other";
   if (leaf.kind === "volume") return "linux";
-  if (leaf.status === "windows") return "windows";
+  if (leaf.status === "windows" || leaf.status === "windowsSkips") return "windows";
   if (leaf.status === "later") return "later";
   return "other";
 }
@@ -51,6 +55,7 @@ function DiskBar({ source }: { source: SourceView }) {
 
 const statusKey: Record<NonNullable<NodeView["status"]>, Key> = {
   windows: "statusWindows",
+  windowsSkips: "statusWindowsSkips",
   later: "statusLater",
   unsupported: "statusUnsupported",
   unrecognized: "statusUnrecognized",
@@ -78,7 +83,8 @@ export function Sidebar(props: Props) {
   // the first item. Arrow keys move within the tree.
   const atCurrent = current !== null && [...sources.disks, ...sources.images].some((s) => hasVolume(s.nodes, current));
 
-  const nodeItems = (nodes: NodeView[], level: number) =>
+  // On a disk, a partition Windows skips opens the dialog that shows how to change that.
+  const nodeItems = (nodes: NodeView[], level: number, disk: boolean) =>
     nodes.map((node, i) => (
       <li key={i} role="none">
         {node.kind === "volume" && node.volume !== null ? (
@@ -93,6 +99,21 @@ export function Sidebar(props: Props) {
             <span className="item-name">{node.label}</span>
             <span className="item-size">{formatSize(node.size, lang)}</span>
           </div>
+        ) : disk && node.fix ? (
+          <div
+            role="treeitem"
+            aria-level={level}
+            aria-haspopup="dialog"
+            tabIndex={-1}
+            title={t("statusWindowsSkips", { detail: node.detail ?? "" })}
+            className="item detected fixable"
+            onClick={() =>
+              node.fix && props.onShowFix({ fix: node.fix, fs: node.label, partType: node.detail ?? "" })
+            }
+          >
+            <span className="item-name">{node.label}</span>
+            <span className="item-note fix-link">{t("showFix")}</span>
+          </div>
         ) : (
           <div role="treeitem" aria-level={level} tabIndex={-1} className={`item ${node.kind}`}>
             <span className="item-name">{node.label}</span>
@@ -104,7 +125,7 @@ export function Sidebar(props: Props) {
           </div>
         )}
         {node.children.length > 0 && (
-          <ul role="group">{nodeItems(node.children, level + 1)}</ul>
+          <ul role="group">{nodeItems(node.children, level + 1, disk)}</ul>
         )}
       </li>
     ));
@@ -132,7 +153,7 @@ export function Sidebar(props: Props) {
         </div>
         {source.open && <DiskBar source={source} />}
         {source.open && source.nodes.length === 0 && <p className="item-note pad">{t("nothingFound")}</p>}
-        {source.nodes.length > 0 && <ul role="group">{nodeItems(source.nodes, 2)}</ul>}
+        {source.nodes.length > 0 && <ul role="group">{nodeItems(source.nodes, 2, source.kind === "disk")}</ul>}
       </li>
     );
   };

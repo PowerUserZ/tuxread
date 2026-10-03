@@ -12,6 +12,56 @@ pub enum TableKind {
     Mbr,
 }
 
+/// A partition's type as its table stores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeCode {
+    Gpt([u8; 16]),
+    Mbr(u8),
+}
+
+/// The disk's own id in its partition table; Windows reports the same (`Get-Disk`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskId {
+    /// The GPT disk GUID.
+    Gpt([u8; 16]),
+    /// The MBR disk signature.
+    Mbr(u32),
+}
+
+/// The GPT partition type Windows mounts filesystems from: Basic data.
+pub const BASIC_DATA: [u8; 16] = [
+    0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, 0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7,
+];
+
+/// True when Windows does not mount a filesystem in a partition of this type. Windows' own
+/// system partitions (EFI system, reserved, recovery) do not count: they are Windows'
+/// business, so TuxRead suggests nothing for them.
+pub fn hides_from_windows(code: TypeCode) -> bool {
+    match code {
+        TypeCode::Gpt(guid) => !matches!(
+            guid_string(&guid).as_str(),
+            "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7" // Basic data
+                | "C12A7328-F81F-11D2-BA4B-00A0C93EC93B" // EFI system
+                | "E3C9E316-0B5C-4DB8-817D-F92DF00215AE" // Microsoft reserved
+                | "DE94BBA4-06D1-4D40-A16A-BFD50179D6AC" // Windows recovery
+        ),
+        // FAT12/16/32 and NTFS/exFAT/ReFS, then Windows recovery and EFI system.
+        TypeCode::Mbr(sys) => !matches!(
+            sys,
+            0x01 | 0x04 | 0x06 | 0x07 | 0x0B | 0x0C | 0x0E | 0x27 | 0xEF
+        ),
+    }
+}
+
+/// The type that makes Windows mount `fs` (as `Ident::Windows` names it) in a `kind` table.
+pub fn windows_type(kind: TableKind, fs: &str) -> TypeCode {
+    match kind {
+        TableKind::Gpt => TypeCode::Gpt(BASIC_DATA),
+        TableKind::Mbr if fs == "FAT" => TypeCode::Mbr(0x0C),
+        TableKind::Mbr => TypeCode::Mbr(0x07),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Partition {
     /// Number as Linux shows it; MBR logical partitions start at 5.
@@ -21,6 +71,7 @@ pub struct Partition {
     /// Length in bytes.
     pub len: u64,
     pub type_name: String,
+    pub type_code: TypeCode,
     /// GPT partition name; empty for MBR.
     pub name: String,
 }
@@ -28,6 +79,7 @@ pub struct Partition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     pub kind: TableKind,
+    pub disk_id: DiskId,
     pub sector_size: u64,
     pub partitions: Vec<Partition>,
 }
@@ -92,12 +144,14 @@ pub fn read_gpt(dev: &dyn BlockDev) -> Option<Table> {
                 start: e.starting_lba.checked_mul(ss)?,
                 len: sectors.checked_mul(ss)?,
                 type_name: gpt_type_name(&e.partition_type_guid),
+                type_code: TypeCode::Gpt(e.partition_type_guid),
                 name: e.partition_name.as_str().to_string(),
             })
         })
         .collect();
     Some(Table {
         kind: TableKind::Gpt,
+        disk_id: DiskId::Gpt(gpt.header.disk_guid),
         sector_size: ss,
         partitions,
     })
@@ -163,11 +217,13 @@ pub fn read_mbr(dev: &dyn BlockDev, sector_size: u32) -> Result<Option<Table>> {
             start: u64::from(p.starting_lba) * ss,
             len: u64::from(p.sectors) * ss,
             type_name: mbr_type_name(p.sys),
+            type_code: TypeCode::Mbr(p.sys),
             name: String::new(),
         })
         .collect();
     Ok(Some(Table {
         kind: TableKind::Mbr,
+        disk_id: DiskId::Mbr(u32::from_le_bytes(mbr.header.disk_signature)),
         sector_size: ss,
         partitions,
     }))
@@ -224,6 +280,14 @@ fn mbr_type_name(sys: u8) -> String {
 mod tests {
     use super::*;
     use crate::dev::MemDev;
+
+    #[test]
+    fn basic_data_is_the_windows_type() {
+        assert_eq!(
+            guid_string(&BASIC_DATA),
+            "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+        );
+    }
 
     fn put(buf: &mut [u8], off: usize, bytes: &[u8]) {
         buf[off..off + bytes.len()].copy_from_slice(bytes);

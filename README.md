@@ -34,6 +34,10 @@ warn the first time. Choose "More info", then "Run anyway".
   A report lists what was copied, renamed, skipped (such as symbolic links) or failed.
 - "Copy diagnostics" puts a summary of your disks and what TuxRead found on them on the
   clipboard, without file names or paths, for a bug report.
+- A disk partitioned with Linux tools can hold exFAT, NTFS or FAT in a partition typed for
+  Linux, and then Windows does not show it. TuxRead marks such a partition "Hidden from
+  Windows" and shows the PowerShell commands that change its type, so that Windows shows it as
+  a drive. Only the type changes, and you run the commands yourself.
 
 The window is in English and Turkish; it follows the Windows language, and About lets you choose.
 

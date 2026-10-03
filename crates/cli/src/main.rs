@@ -10,7 +10,7 @@ use tuxread_core::copy::{Conflict, Outcome, copy_out};
 use tuxread_core::dev::{BlockDev, FileDev};
 use tuxread_core::display::display_name;
 use tuxread_core::fs::{Entry, Kind, join};
-use tuxread_core::probe::{self, Node, NodeKind, Status, Volume};
+use tuxread_core::probe::{self, Node, NodeKind, Volume};
 
 const USAGE: &str = "usage:
   tuxread-cli disks
@@ -132,10 +132,9 @@ fn volume(nodes: &[Node], number: &str) -> Result<Volume, String> {
         .ok_or(format!("no volume #{n}"))?;
     match &node.kind {
         NodeKind::Volume(v) => Ok(v.clone()),
-        NodeKind::Detected { status, .. } => Err(format!(
-            "volume #{n} cannot be browsed: {}",
-            status_text(status)
-        )),
+        NodeKind::Detected { status, .. } => {
+            Err(format!("volume #{n} cannot be browsed: {}", status))
+        }
         NodeKind::Partition { .. } => Err(format!("#{n} is a partition")),
     }
 }
@@ -162,21 +161,11 @@ fn print_nodes(nodes: &[Node], depth: usize, counter: &mut usize) {
                 *counter += 1;
                 println!(
                     "{indent}#{counter} {label} [{size}] - {}",
-                    display_name(status_text(status).as_bytes())
+                    display_name(status.to_string().as_bytes())
                 );
             }
         }
         print_nodes(&node.children, depth + 1, counter);
-    }
-}
-
-fn status_text(status: &Status) -> String {
-    match status {
-        Status::WindowsCanOpen => "Windows can open this".into(),
-        Status::Later => "supported in a later version".into(),
-        Status::NotSupported(why) => format!("not supported: {why}"),
-        Status::Unrecognized => "unrecognized".into(),
-        Status::Error(e) => format!("error: {e}"),
     }
 }
 
