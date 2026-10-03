@@ -1,0 +1,31 @@
+# cargo-deny (spec §5.4, §7.6): every dependency's license must be compatible with
+# MIT OR Apache-2.0, GPL, LGPL and AGPL are never accepted, and RustSec advisories fail CI.
+# Run: cargo deny check licenses advisories
+
+[graph]
+# The platforms TuxRead ships for and builds on; other targets' dependencies never reach a user.
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
+
+[licenses]
+# Permissive licenses, plus MPL-2.0 (file-level copyleft: the unmodified sources are on crates.io).
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "0BSD",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[advisories]
+# Vulnerabilities fail for every crate. "Unmaintained" notices fail only for crates the
+# workspace uses directly: the ones that come through Tauri or mbrman (bincode, unic-*,
+# proc-macro-error) are not ours to replace, and none has a vulnerability.
+unmaintained = "workspace"
+ignore = []
