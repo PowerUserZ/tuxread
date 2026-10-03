@@ -1,0 +1,133 @@
+# CI (spec §7.6): the corpus is made on Linux; Windows x64 runs every check against it, and Linux
+# checks that the portable crates still build there.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  corpus:
+    name: Corpus
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: corpus
+          # The corpus is rebuilt only when the scripts that make it change.
+          key: corpus-${{ hashFiles('scripts/make-corpus.sh', 'scripts/fixture.py', 'scripts/manifest.py') }}
+      - name: Make the corpus (needs root for loop mounts)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo bash scripts/make-corpus.sh "$GITHUB_WORKSPACE/corpus"
+          sudo chown -R "$(id -u):$(id -g)" corpus
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corpus
+          path: corpus
+          retention-days: 7
+
+  linux:
+    name: Linux
+    needs: corpus
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: corpus
+          path: corpus
+      - run: rustup update stable --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      # tuxread-app is Windows-only: Tauri's Windows backend and tuxread-win's disk access.
+      - run: cargo clippy --locked --workspace --exclude tuxread-app --all-targets -- -D warnings
+      - run: cargo test --locked --workspace --exclude tuxread-app
+        env:
+          TUXREAD_CORPUS: ${{ github.workspace }}/corpus
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses advisories
+
+  windows:
+    name: Windows x64
+    needs: corpus
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: corpus
+          path: corpus
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: rustup update stable --no-self-update; rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: npm ci
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
+        env:
+          TUXREAD_CORPUS: ${{ github.workspace }}\corpus
+      - run: npm test
+      - run: npm run build
+      - name: Read a real disk (spec §7.4)
+        run: |
+          # The corpus image attached read-only as a disk. The runner is elevated, so the helper
+          # test starts its helper without a prompt and the CLI reads the disk directly.
+          $vhd = "$env:RUNNER_TEMP\mbr-logical.vhd"
+          python scripts/make-vhd.py corpus\mbr-logical.img $vhd
+          $disk = & .\scripts\attach-vhd.ps1 $vhd
+          $env:TUXREAD_TEST_DISK = "$disk"
+          $env:TUXREAD_TEST_DISK_IMAGE = "$PWD\corpus\mbr-logical.img"
+          cargo test --locked -p tuxread-win --test helper -- a_real_disk
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # The CLI copies the same files from the disk as from the image.
+          cargo build --locked --release -p tuxread-cli
+          $cli = "target\release\tuxread-cli.exe"
+          New-Item -ItemType Directory "$env:RUNNER_TEMP\from-image", "$env:RUNNER_TEMP\from-disk" | Out-Null
+          & $cli cp corpus\mbr-logical.img 1 / "$env:RUNNER_TEMP\from-image"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $cli cp "disk:$disk" 1 / "$env:RUNNER_TEMP\from-disk"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $a = Get-ChildItem -Recurse -File "$env:RUNNER_TEMP\from-image" | ForEach-Object { "{0} {1}" -f $_.FullName.Substring("$env:RUNNER_TEMP\from-image".Length), (Get-FileHash $_.FullName).Hash }
+          $b = Get-ChildItem -Recurse -File "$env:RUNNER_TEMP\from-disk" | ForEach-Object { "{0} {1}" -f $_.FullName.Substring("$env:RUNNER_TEMP\from-disk".Length), (Get-FileHash $_.FullName).Hash }
+          if (Compare-Object $a $b) { Write-Error "the disk and the image copies differ"; exit 1 }
+          "identical: $($a.Count) files"
+          Dismount-DiskImage -ImagePath $vhd | Out-Null
+      - name: Build the window, with a DevTools port for the smoke test
+        # The runner is elevated, and WebView2 ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS in an
+        # elevated process. So this build asks for the port in its own configuration: Tauri's
+        # default browser arguments plus the port. Release builds never have it.
+        run: |
+          $window = (Get-Content src-tauri\tauri.conf.json -Raw | ConvertFrom-Json).app.windows[0]
+          $window | Add-Member additionalBrowserArgs '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=0'
+          @{ app = @{ windows = @($window) } } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\smoke.json"
+          npx tauri build --no-bundle --config "$env:RUNNER_TEMP\smoke.json"
+      - name: Without WebView2, a message box (spec §9)
+        run: ./scripts/check-no-webview2.ps1 target\release\TuxRead.exe
+      - name: Smoke test the window
+        # The disk scenario stays a release-checklist step: it needs a UAC prompt, and on this
+        # elevated runner the window reads disks without the helper.
+        run: node scripts/smoke/run.mjs target\release\TuxRead.exe harden browse copy
+        env:
+          TUXREAD_SMOKE_BIG: ${{ github.workspace }}\corpus\ext4.img

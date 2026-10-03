@@ -3,8 +3,10 @@
 // The scenarios are the other .mjs files in this folder; with no names given, all of them run.
 // Each scenario gets a fresh app with a throwaway WebView2 profile, so it starts in a known state
 // and leaves the user's own TuxRead settings alone.
+// WebView2 ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS in an elevated process. Run it from an
+// unelevated console, or against a build whose configuration asks for the port (as CI does).
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -23,20 +25,28 @@ if (!existsSync(exe)) {
   process.exit(2);
 }
 
-const port = 9333;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const devtools = () =>
-  fetch(`http://127.0.0.1:${port}/json`)
+// WebView2 picks a free port and writes it to DevToolsActivePort in the profile. A fixed port
+// fails whenever something else holds it, such as the last scenario's WebView2 while it exits.
+const devtools = (profile) => {
+  let port;
+  try {
+    port = readFileSync(join(profile, "EBWebView", "DevToolsActivePort"), "utf8").split("\n")[0];
+  } catch {
+    return undefined;
+  }
+  return fetch(`http://127.0.0.1:${port}/json`)
     .then((r) => r.json())
     .then((list) => list.find((t) => t.type === "page"))
     .catch(() => undefined);
+};
 
 async function launch() {
   const profile = mkdtempSync(join(tmpdir(), "tuxread-smoke-"));
   const app = spawn(exe, [], {
     env: {
       ...process.env,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=0",
       WEBVIEW2_USER_DATA_FOLDER: profile,
     },
     stdio: "ignore",
@@ -44,7 +54,7 @@ async function launch() {
   let target;
   for (let i = 0; i < 150 && !target; i++) {
     await sleep(200);
-    target = await devtools();
+    target = await devtools(profile);
   }
   if (!target) {
     app.kill();
@@ -112,8 +122,8 @@ async function launch() {
     async close() {
       ws.close();
       app.kill();
-      // Wait for WebView2 to let go of the port and the profile before the next scenario.
-      for (let i = 0; i < 50 && (await devtools()); i++) await sleep(100);
+      // WebView2 holds the profile for a moment after the app ends. Each scenario gets its own
+      // port, so only the profile is waited for.
       for (let i = 0; i < 20; i++) {
         try {
           rmSync(profile, { recursive: true, force: true });
