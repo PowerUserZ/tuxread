@@ -167,7 +167,19 @@ async fn diagnostics(ctx: Ctx<'_>) -> CmdResult<String> {
     blocking(ctx, |s| Ok(diagnostics::diagnostics(&s.app))).await
 }
 
+/// Shown when the WebView2 runtime is missing (spec §9), in both of the app's languages: the
+/// window, which knows the chosen language, cannot open without it.
+const NO_WEBVIEW2: &str = "TuxRead needs the Microsoft Edge WebView2 Runtime, which is not installed for this account. Download it from https://developer.microsoft.com/microsoft-edge/webview2, install it, and start TuxRead again.
+
+TuxRead'in çalışması için Microsoft Edge WebView2 Runtime gerekiyor ve bu hesapta kurulu değil. https://developer.microsoft.com/microsoft-edge/webview2 adresinden indirip kurun, sonra TuxRead'i yeniden başlatın.";
+
 pub fn run() {
+    // Without the runtime Tauri shows its own error but then keeps running, windowless. This runs
+    // before the log exists, so the message box is the only report.
+    if tauri::webview_version().is_err() {
+        tuxread_win::show_error("TuxRead", NO_WEBVIEW2);
+        std::process::exit(1);
+    }
     let logs = tauri_plugin_log::Builder::new()
         .target(tauri_plugin_log::Target::new(
             tauri_plugin_log::TargetKind::LogDir {
