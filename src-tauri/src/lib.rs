@@ -12,6 +12,7 @@
 
 pub mod display;
 pub mod error;
+pub mod sources;
 pub mod worker;
 
 pub fn run() {
