@@ -3,11 +3,14 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type CommandError,
+  type Conflict,
   type Crumb,
   type EntryView,
   type Properties,
   type SourcesView,
   asCommandError,
+  cancelJob,
+  copy,
   diagnostics,
   listDir,
   listSources,
@@ -15,16 +18,22 @@ import {
   openImage,
   stat,
 } from "./api";
-import { AboutDialog, ErrorText, PropertiesDialog } from "./dialogs";
+import { AboutDialog, CopyDialog, ErrorText, PropertiesDialog, ReportDialog } from "./dialogs";
 import { FileList } from "./FileList";
 import { formatSize } from "./format";
 import { I18n, type Lang, type T, pickLang, translate } from "./i18n";
 import { BackIcon, RefreshIcon, UpIcon } from "./icons";
+import { type Job, JobPanel } from "./JobPanel";
 import { type Selection, type Sort, type SortKey, click, emptySelection, move, selectAll, sortEntries } from "./listing";
 import { Sidebar, type VolumeChoice } from "./Sidebar";
 
 type Place = { volume: number; dir: number };
-type Open = null | { kind: "props"; props: Properties } | { kind: "about" };
+type Open =
+  | null
+  | { kind: "copy" }
+  | { kind: "report"; job: number }
+  | { kind: "props"; props: Properties }
+  | { kind: "about" };
 
 const LANG_KEY = "tuxread.language";
 
@@ -66,8 +75,10 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<Sort>({ key: "name", descending: false });
   const [selection, setSelection] = useState<Selection>(emptySelection);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [dialog, setDialog] = useState<Open>(null);
   const request = useRef(0);
+  const nextJob = useRef(0);
 
   const fail = useCallback((e: unknown) => setError(asCommandError(e)), []);
   const refreshSources = useCallback(() => listSources().then(setSources, fail), [fail]);
@@ -151,6 +162,36 @@ export function App() {
     else showProperties(entry);
   };
 
+  const copyTo = () => {
+    if (place && selection.ids.size > 0) setDialog({ kind: "copy" });
+  };
+
+  const startCopy = (dest: string, conflict: Conflict) => {
+    if (!place) return;
+    setDialog(null);
+    // Events can arrive before `copy` returns the job's number: they are matched by `key`.
+    const key = ++nextJob.current;
+    const update = (change: (job: Job) => Job) =>
+      setJobs((all) => all.map((j) => (j.key === key ? change(j) : j)));
+    setJobs((all) => [
+      ...all,
+      { key, id: null, dest, progress: { files: 0, bytes: 0, current: "" }, finished: null },
+    ]);
+    copy(place.volume, [...selection.ids], dest, conflict, (e) => {
+      if (e.event === "progress") update((j) => ({ ...j, progress: e.data }));
+      else update((j) => ({ ...j, finished: e.data }));
+    }).then(
+      (id) => update((j) => ({ ...j, id })),
+      (e) => {
+        const err = asCommandError(e);
+        update((j) => ({
+          ...j,
+          finished: { copied: 0, renamed: 0, skipped: 0, failed: 0, cancelled: false, error: err },
+        }));
+      },
+    );
+  };
+
   const onOpenDisk = (number: number) => {
     setOpening(number);
     setError(null);
@@ -187,6 +228,7 @@ export function App() {
     else if (e.key === "Enter") activate(target());
     else if (e.key === "Backspace") up();
     else if (e.ctrlKey && e.key.toLowerCase() === "a") setSelection(selectAll(order));
+    else if (e.ctrlKey && e.key.toLowerCase() === "c") copyTo();
     else return;
     e.preventDefault();
   };
@@ -259,6 +301,9 @@ export function App() {
               </ol>
             </nav>
             <div className="actions">
+              <button type="button" className="primary" disabled={selection.ids.size === 0} onClick={copyTo}>
+                {t("copyTo")}
+              </button>
               <button type="button" disabled={selection.ids.size === 0} onClick={() => showProperties()}>
                 {t("properties")}
               </button>
@@ -293,6 +338,12 @@ export function App() {
             onActivate={activate}
             onKeyDown={onListKey}
           />
+          <JobPanel
+            jobs={jobs}
+            onCancel={(id) => void cancelJob(id).catch(fail)}
+            onReport={(id) => setDialog({ kind: "report", job: id })}
+            onDismiss={(key) => setJobs((all) => all.filter((j) => j.key !== key))}
+          />
           <footer className="statusbar">
             <span>
               {place && (sorted.length === 1 ? t("itemsOne") : t("itemsMany", { n: sorted.length.toLocaleString(lang) }))}
@@ -309,6 +360,10 @@ export function App() {
             )}
           </footer>
         </main>
+        {dialog?.kind === "copy" && (
+          <CopyDialog count={selection.ids.size} onCopy={startCopy} onClose={() => setDialog(null)} />
+        )}
+        {dialog?.kind === "report" && <ReportDialog job={dialog.job} onClose={() => setDialog(null)} />}
         {dialog?.kind === "props" && <PropertiesDialog props={dialog.props} onClose={() => setDialog(null)} />}
         {dialog?.kind === "about" && (
           <AboutDialog

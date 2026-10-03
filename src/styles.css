@@ -628,3 +628,162 @@ select {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* Copying: the job panel, the copy options and the report */
+.jobs {
+  border-top: 1px solid var(--line);
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.job + .job {
+  border-top: 1px solid var(--line);
+}
+
+.job-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.job-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-line {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-line.warn,
+.job-line.error {
+  color: var(--danger);
+}
+
+.current {
+  margin-left: 8px;
+}
+
+/* The copy does not know its total in advance, so the bar only shows that work goes on. */
+.bar {
+  width: 120px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--accent);
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar span {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
+
+.dest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dest input {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.radio input {
+  accent-color: var(--navy);
+}
+
+.report {
+  max-height: 46vh;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.report li {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 2px 12px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.report li:last-child {
+  border-bottom: none;
+}
+
+.report .outcome {
+  color: var(--muted);
+}
+
+.report .failed .outcome {
+  color: var(--danger);
+}
+
+.report .source {
+  overflow-wrap: anywhere;
+}
+
+.report .why {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.note.error {
+  color: var(--danger);
+}
